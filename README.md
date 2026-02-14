@@ -212,5 +212,13 @@ Full plan details in [PLAN.md](PLAN.md).
 - **Format Pane**: License key configurable from Power BI's Format Pane alongside Backend URL
 - **Backward compatible**: Old standalone license keys, IP-based free tier, and "Continue without account" all still work
 
-### Phase 6–10: Pending
-See [PLAN.md](PLAN.md) for remaining phases covering legal documents, branding, backend deployment, Partner Center submission, and post-launch.
+### Phase 6: Legal & Compliance Documents — Complete
+All legal documents are in the [`legal/`](legal/) directory:
+- [Privacy Policy](legal/privacy-policy.md) — data collected, data flow, storage, retention, GDPR/CCPA rights
+- [EULA](legal/eula.md) — license grant, tier terms, restrictions, IP ownership, warranties, liability
+- [Terms of Service](legal/terms-of-service.md) — accounts, acceptable use, billing ($15/mo), uptime, termination
+- [Data Processing Agreement](legal/dpa.md) — GDPR Article 28, sub-processors, breach notification (72h), audit rights
+- [Cookie Policy](legal/cookie-policy.md) — localStorage (no cookies), Stripe Checkout cookies, no tracking
+
+### Phase 7–10: Pending
+See [PLAN.md](PLAN.md) for remaining phases covering branding, backend deployment, Partner Center submission, and post-launch.

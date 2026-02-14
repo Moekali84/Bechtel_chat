@@ -81,17 +81,17 @@ Prepare the "Data Insights Assistant" Power BI visual for publication on Microso
 
 ## Phase 6: Legal & Compliance Documents
 
-- [ ] **6.1** Write and host a **Privacy Policy** (HTTPS URL) covering:
+- [x] **6.1** Write and host a **Privacy Policy** (HTTPS URL) covering:
   - What data the visual collects
   - How data is transmitted to the backend
   - Where data is stored/processed
   - Data retention policies
   - Third-party data sharing (OpenRouter/LLM provider)
   - User rights (access, deletion, portability)
-- [ ] **6.2** Write an **End-User License Agreement (EULA)** — or use Microsoft's Standard Contract
-- [ ] **6.3** Write **Terms of Service** for the backend API
-- [ ] **6.4** Write a **Data Processing Agreement (DPA)** for EU/GDPR customers
-- [ ] **6.5** Create a **Cookie Policy** if your website uses cookies
+- [x] **6.2** Write an **End-User License Agreement (EULA)** — or use Microsoft's Standard Contract
+- [x] **6.3** Write **Terms of Service** for the backend API
+- [x] **6.4** Write a **Data Processing Agreement (DPA)** for EU/GDPR customers
+- [x] **6.5** Create a **Cookie Policy** if your website uses cookies
 - [ ] **6.6** Register a business entity if not already done (required for Partner Center)
 
 ## Phase 7: Branding & Marketing Assets

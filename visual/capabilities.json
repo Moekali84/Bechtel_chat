@@ -16,6 +16,11 @@
           "type": { "text": true },
           "displayName": "Backend API URL",
           "description": "URL of your deployed PBIChat backend API (e.g. https://your-app.azurewebsites.net)"
+        },
+        "licenseKey": {
+          "type": { "text": true },
+          "displayName": "License Key",
+          "description": "Pro license key for PBIChat (optional, leave blank for free tier)"
         }
       }
     }
