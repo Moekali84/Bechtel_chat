@@ -6,14 +6,24 @@ Deploy on Azure App Service, Azure Functions, or any Python host.
 
 import os
 import re
+import time
 import asyncio
+import secrets
+import uuid
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 import httpx
+import jwt
+import stripe
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, Literal, Union
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, field_validator
+from typing import Optional
+from supabase import create_client, Client as SupabaseClient
 import json
 
 ENV_PATH = Path(__file__).parent / ".env"
@@ -21,13 +31,35 @@ load_dotenv(ENV_PATH)
 
 app = FastAPI(title="PBIChat API")
 
-# CORS — allow the Power BI visual to call this backend
+# ══════════════════════════════════════════════════════════
+# CORS — restrict to your Power BI domain in production
+# ══════════════════════════════════════════════════════════
+# In production, replace ["*"] with specific origins:
+#   allow_origins=["https://app.powerbi.com", "https://your-company.powerbi.com"]
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to your Power BI domain
+    allow_origins=[o.strip() for o in CORS_ORIGINS],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ══════════════════════════════════════════════════════════
+# RATE LIMITING — per-IP, configurable via env
+# ══════════════════════════════════════════════════════════
+RATE_LIMIT_RPM = int(os.getenv("RATE_LIMIT_RPM", "60"))  # requests per minute
+_rate_buckets: dict[str, list[float]] = defaultdict(list)
+
+def _check_rate_limit(client_ip: str):
+    """Simple sliding-window rate limiter. Raises 429 if exceeded."""
+    now = time.time()
+    window = _rate_buckets[client_ip]
+    # Prune entries older than 60s
+    cutoff = now - 60
+    _rate_buckets[client_ip] = [t for t in window if t > cutoff]
+    if len(_rate_buckets[client_ip]) >= RATE_LIMIT_RPM:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a moment.")
+    _rate_buckets[client_ip].append(now)
 
 # ══════════════════════════════════════════════════════════
 # CONFIG — Set via environment variables or .env file
@@ -46,7 +78,278 @@ if SEMANTIC_MODEL_FILE.exists():
 else:
     SEMANTIC_MODEL = os.getenv("SEMANTIC_MODEL", "")
 EXTRA_CONTEXT = os.getenv("EXTRA_CONTEXT", "")
-SETTINGS_PASSWORD = os.getenv("SETTINGS_PASSWORD", "Safari99")
+SETTINGS_PASSWORD = os.getenv("SETTINGS_PASSWORD", "")
+
+# ══════════════════════════════════════════════════════════
+# AUTHENTICATION — password via X-Auth-Password header
+# ══════════════════════════════════════════════════════════
+def require_auth(x_auth_password: str = Header(..., alias="X-Auth-Password")):
+    """Dependency: validates the settings password sent via header."""
+    if not SETTINGS_PASSWORD:
+        raise HTTPException(status_code=500, detail="SETTINGS_PASSWORD not configured on the server. Set it in .env.")
+    if not secrets.compare_digest(x_auth_password, SETTINGS_PASSWORD):
+        raise HTTPException(status_code=403, detail="Invalid password.")
+
+
+def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    """Dependency: decode Supabase JWT and return user_id, or None."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization[7:]
+    if not SUPABASE_JWT_SECRET:
+        return None
+    try:
+        payload = jwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+        return payload.get("sub")
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+
+
+def require_user(authorization: Optional[str] = Header(None)) -> str:
+    """Dependency: like get_current_user but raises 401 if not authenticated."""
+    user_id = get_current_user(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required. Please log in.")
+    return user_id
+
+
+# ══════════════════════════════════════════════════════════
+# LICENSE DATABASE (Supabase)
+# ══════════════════════════════════════════════════════════
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+
+# Stripe configuration
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
+
+_supabase: Optional[SupabaseClient] = None
+
+def _get_sb() -> SupabaseClient:
+    """Get the Supabase client (lazy-initialized)."""
+    global _supabase
+    if _supabase is None:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise HTTPException(status_code=500, detail="SUPABASE_URL and SUPABASE_KEY must be set in .env")
+        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase
+
+_INIT_SQL = """
+CREATE TABLE IF NOT EXISTS licenses (
+    key             TEXT PRIMARY KEY,
+    tier            TEXT NOT NULL DEFAULT 'pro',
+    label           TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at      TIMESTAMPTZ,
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    max_connections INTEGER DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usage_log (
+    id              BIGSERIAL PRIMARY KEY,
+    license_key     TEXT,
+    user_id         TEXT,
+    client_ip       TEXT NOT NULL,
+    endpoint        TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_day
+    ON usage_log (license_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_user
+    ON usage_log (user_id, created_at);
+"""
+
+_sb_tables_ready = False
+
+_sb_users_ready = False
+
+def _init_db():
+    """Check if license tables exist in Supabase. Print setup SQL if missing."""
+    global _sb_tables_ready, _sb_users_ready
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("PBICHAT: SUPABASE_URL/SUPABASE_KEY not set — licensing disabled.")
+        return
+    try:
+        sb = _get_sb()
+        sb.table("licenses").select("key", count="exact").limit(0).execute()
+        sb.table("usage_log").select("id", count="exact").limit(0).execute()
+        _sb_tables_ready = True
+        print("PBICHAT: Supabase license tables OK.")
+    except Exception as e:
+        err = str(e)
+        if "could not find" in err.lower() or "does not exist" in err.lower() or "PGRST" in err:
+            print("\n" + "=" * 60)
+            print("PBICHAT: License tables not found in Supabase.")
+            print("Run this SQL in your Supabase SQL Editor")
+            print(f"  ({SUPABASE_URL.replace('.co', '.co/project/')}/sql/new):")
+            print("=" * 60)
+            print(_INIT_SQL)
+            print("=" * 60 + "\n")
+        else:
+            print(f"PBICHAT: Supabase connection error: {err[:200]}")
+
+    # Probe user management tables (graceful if missing)
+    try:
+        sb = _get_sb()
+        sb.table("users").select("id", count="exact").limit(0).execute()
+        sb.table("subscriptions").select("id", count="exact").limit(0).execute()
+        sb.table("payments").select("id", count="exact").limit(0).execute()
+        _sb_users_ready = True
+        print("PBICHAT: Supabase user/billing tables OK.")
+    except Exception:
+        print("PBICHAT: User/billing tables not found — auth/billing endpoints disabled until tables are created.")
+
+_init_db()
+
+# ══════════════════════════════════════════════════════════
+# LICENSING — tier definitions and validation
+# ══════════════════════════════════════════════════════════
+FREE_DAILY_QUERY_LIMIT = int(os.getenv("FREE_DAILY_QUERY_LIMIT", "5"))
+FREE_MAX_CONNECTIONS = 1
+FREE_CHART_TYPES = {"bar", "line", "pie"}
+ALL_CHART_TYPES = {"bar", "line", "pie", "doughnut", "scatter", "horizontalBar"}
+
+@dataclass
+class LicenseInfo:
+    """Resolved license state for the current request."""
+    tier: str                           # "free" or "pro"
+    key: Optional[str]                  # None for free tier
+    label: str                          # "" for free
+    daily_used: int                     # queries used today
+    daily_limit: Optional[int]          # None = unlimited
+    max_connections: Optional[int]      # None = unlimited
+    allowed_charts: set = field(default_factory=lambda: FREE_CHART_TYPES)
+
+def resolve_license(license_key: Optional[str], client_ip: str, user_id: Optional[str] = None) -> LicenseInfo:
+    """Look up a license key and return its tier + usage.
+    Checks users.license_key first (new system), then falls back to licenses table."""
+    if not _sb_tables_ready:
+        # Supabase not configured or tables missing — default to unlimited (no enforcement)
+        return LicenseInfo(
+            tier="pro", key=None, label="(no license DB)",
+            daily_used=0, daily_limit=None, max_connections=None,
+            allowed_charts=ALL_CHART_TYPES,
+        )
+
+    sb = _get_sb()
+    today = date.today().isoformat()
+
+    # ── New system: check users table first ──
+    if license_key and _sb_users_ready:
+        try:
+            resp = sb.table("users").select("id, email, tier, license_key").eq("license_key", license_key).execute()
+            if resp.data:
+                user = resp.data[0]
+                uid = user["id"]
+                tier = user["tier"]
+                if tier == "pro":
+                    return LicenseInfo(
+                        tier="pro", key=license_key, label=user["email"],
+                        daily_used=0, daily_limit=None, max_connections=None,
+                        allowed_charts=ALL_CHART_TYPES,
+                    )
+                # Free tier with account — count usage by user_id
+                usage_resp = sb.table("usage_log") \
+                    .select("id", count="exact") \
+                    .eq("user_id", uid) \
+                    .gte("created_at", today) \
+                    .execute()
+                used = usage_resp.count if usage_resp.count is not None else 0
+                return LicenseInfo(
+                    tier="free", key=license_key, label=user["email"],
+                    daily_used=used,
+                    daily_limit=FREE_DAILY_QUERY_LIMIT,
+                    max_connections=FREE_MAX_CONNECTIONS,
+                    allowed_charts=FREE_CHART_TYPES,
+                )
+        except Exception:
+            pass  # Fall through to legacy lookup
+
+    if not license_key:
+        # Free tier — count today's usage by user_id (if logged in) or IP
+        if user_id and _sb_users_ready:
+            resp = sb.table("usage_log") \
+                .select("id", count="exact") \
+                .eq("user_id", user_id) \
+                .gte("created_at", today) \
+                .execute()
+        else:
+            resp = sb.table("usage_log") \
+                .select("id", count="exact") \
+                .is_("license_key", "null") \
+                .is_("user_id", "null") \
+                .eq("client_ip", client_ip) \
+                .gte("created_at", today) \
+                .execute()
+        used = resp.count if resp.count is not None else 0
+
+        return LicenseInfo(
+            tier="free", key=None, label="",
+            daily_used=used,
+            daily_limit=FREE_DAILY_QUERY_LIMIT,
+            max_connections=FREE_MAX_CONNECTIONS,
+            allowed_charts=FREE_CHART_TYPES,
+        )
+
+    # ── Legacy: Validate key in licenses table ──
+    resp = sb.table("licenses").select("*").eq("key", license_key).execute()
+    if not resp.data:
+        raise HTTPException(status_code=403, detail="Invalid license key.")
+
+    lic = resp.data[0]
+
+    if not lic["is_active"]:
+        raise HTTPException(status_code=403, detail="License key has been revoked.")
+
+    if lic.get("expires_at"):
+        exp = datetime.fromisoformat(lic["expires_at"])
+        if datetime.now(timezone.utc) > exp:
+            raise HTTPException(status_code=403, detail="License key has expired.")
+
+    return LicenseInfo(
+        tier=lic["tier"],
+        key=license_key,
+        label=lic["label"],
+        daily_used=0,
+        daily_limit=None,
+        max_connections=lic.get("max_connections"),
+        allowed_charts=ALL_CHART_TYPES,
+    )
+
+def record_usage(license_key: Optional[str], client_ip: str, endpoint: str, user_id: Optional[str] = None):
+    """Record a usage event in Supabase."""
+    if not _sb_tables_ready:
+        return
+    sb = _get_sb()
+    row = {
+        "license_key": license_key,
+        "client_ip": client_ip,
+        "endpoint": endpoint,
+    }
+    if user_id:
+        row["user_id"] = user_id
+    sb.table("usage_log").insert(row).execute()
+
+async def resolve_license_dep(
+    request: Request,
+    x_license_key: Optional[str] = Header(None, alias="X-License-Key"),
+    authorization: Optional[str] = Header(None),
+) -> LicenseInfo:
+    """Dependency that resolves the license for the current request."""
+    client_ip = request.client.host
+    user_id = get_current_user(authorization)
+    return await asyncio.to_thread(resolve_license, x_license_key, client_ip, user_id)
 
 
 def save_env():
@@ -61,6 +364,16 @@ def save_env():
         f"EXTRA_CONTEXT={EXTRA_CONTEXT}",
         "",
         f"SETTINGS_PASSWORD={SETTINGS_PASSWORD}",
+        "",
+        f"SUPABASE_URL={SUPABASE_URL}",
+        f"SUPABASE_KEY={SUPABASE_KEY}",
+        "",
+        f"SUPABASE_JWT_SECRET={SUPABASE_JWT_SECRET}",
+        "",
+        f"STRIPE_SECRET_KEY={STRIPE_SECRET_KEY}",
+        f"STRIPE_PUBLISHABLE_KEY={STRIPE_PUBLISHABLE_KEY}",
+        f"STRIPE_WEBHOOK_SECRET={STRIPE_WEBHOOK_SECRET}",
+        f"STRIPE_PRICE_ID={STRIPE_PRICE_ID}",
         "",
     ]
     ENV_PATH.write_text("\n".join(lines))
@@ -190,12 +503,23 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = []
     extra_context: Optional[str] = None
 
+    @field_validator("message")
+    @classmethod
+    def message_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Message cannot be empty.")
+        if len(v) > 10000:
+            raise ValueError("Message too long (max 10,000 characters).")
+        return v
+
 class ChatResponse(BaseModel):
     response: str
     queries_executed: list[dict] = []  # {sql, result, error} for transparency
+    tier: str = "free"
+    daily_used: Optional[int] = None
+    daily_limit: Optional[int] = None
 
 class ConfigUpdate(BaseModel):
-    password: str
     openrouter_api_key: Optional[str] = None
     llm_model: Optional[str] = None
     extra_context: Optional[str] = None
@@ -205,7 +529,6 @@ class TmdlFile(BaseModel):
     content: str
 
 class TmdlUploadRequest(BaseModel):
-    password: str
     files: list[TmdlFile]
 
 class HealthResponse(BaseModel):
@@ -280,8 +603,16 @@ load_connections()
 # ══════════════════════════════════════════════════════════
 # SQL EXECUTION (multi-connection)
 # ══════════════════════════════════════════════════════════
+_BLOCKED_SQL = re.compile(
+    r"^\s*(DROP|ALTER|TRUNCATE|DELETE|UPDATE|INSERT|CREATE|GRANT|REVOKE|EXEC|EXECUTE|MERGE)\b",
+    re.IGNORECASE,
+)
+
 async def execute_sql(sql: str, connection_id: str = None) -> str:
-    """Execute SQL against a named connection (or the first available one)."""
+    """Execute SQL against a named connection (or the first available one).
+    Only SELECT, SHOW, DESCRIBE, and EXPLAIN statements are allowed."""
+    if _BLOCKED_SQL.match(sql.strip()):
+        return "ERROR: Only read-only queries (SELECT, SHOW, DESCRIBE) are allowed. Destructive operations are blocked."
     if connection_id and connection_id in CONNECTIONS:
         conn = CONNECTIONS[connection_id]
     elif CONNECTIONS:
@@ -413,7 +744,12 @@ async def _execute_sqlserver_sql(sql: str, conn: dict) -> str:
     try:
         return await asyncio.to_thread(_run)
     except Exception as e:
-        return f"ERROR: {e}"
+        # Scrub credentials from error messages
+        msg = str(e)
+        for secret in [conn.get("password", ""), conn.get("username", "")]:
+            if secret and secret in msg:
+                msg = msg.replace(secret, "***")
+        return f"ERROR: {msg}"
 
 
 # ══════════════════════════════════════════════════════════
@@ -603,7 +939,7 @@ def _match_table_to_connection(table_info: dict) -> str:
     return db_conn["id"] if db_conn else ""
 
 
-def build_system_prompt(discovered_schema: str, extra_ctx: str = "") -> str:
+def build_system_prompt(discovered_schema: str, extra_ctx: str = "", allowed_charts: Optional[set] = None) -> str:
     p = """You are "PBIChat" — a data query tool with live SQL access to one or more database connections.
 
 ## #1 RULE — DATA ONLY, ZERO OUTSIDE KNOWLEDGE (READ THIS FIRST)
@@ -751,7 +1087,7 @@ Study every relationship, join key, and cardinality BEFORE writing any SQL.
 ## CHART OUTPUT
 When your analysis produces data that would be clearer as a visual, include a chart by outputting a ```chart code block with JSON inside. The frontend will render it as an interactive chart.
 
-**Supported chart types:** bar, line, pie, doughnut, scatter, horizontalBar
+**Supported chart types:** """ + ", ".join(sorted(allowed_charts or ALL_CHART_TYPES)) + """
 
 **Format:**
 ```chart
@@ -843,10 +1179,15 @@ async def call_llm(system: str, messages: list[dict]) -> str:
 
         if resp.status_code != 200:
             error = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            err_msg = error.get("error", {}).get("message", resp.text[:200]) if isinstance(error.get("error"), dict) else str(error.get("error", resp.text[:200]))
+            err_msg = error.get("error", {}).get("message", "") if isinstance(error.get("error"), dict) else str(error.get("error", ""))
+            # Scrub any sensitive data from error messages
+            safe_msg = err_msg[:200] if err_msg else f"HTTP {resp.status_code}"
+            for secret in [OPENROUTER_API_KEY, SETTINGS_PASSWORD]:
+                if secret and secret in safe_msg:
+                    safe_msg = safe_msg.replace(secret, "***")
             raise HTTPException(
-                status_code=resp.status_code,
-                detail=f"OpenRouter API error: {err_msg}",
+                status_code=502,
+                detail=f"LLM API error: {safe_msg}",
             )
 
         data = resp.json()
@@ -856,6 +1197,13 @@ async def call_llm(system: str, messages: list[dict]) -> str:
 # ══════════════════════════════════════════════════════════
 # ENDPOINTS
 # ══════════════════════════════════════════════════════════
+@app.post("/verify-password")
+async def verify_password(request: Request, _auth=Depends(require_auth)):
+    """Verify the password is correct. Returns 200 if valid, 403 if not."""
+    _check_rate_limit(request.client.host)
+    return {"status": "ok"}
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health():
     return HealthResponse(
@@ -892,8 +1240,23 @@ async def warehouse_status(connection_id: str = None):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
-    """Main chat endpoint — runs the agentic loop."""
+async def chat(req: ChatRequest, request: Request, _auth=Depends(require_auth), license: LicenseInfo = Depends(resolve_license_dep), authorization: Optional[str] = Header(None)):
+    """Main chat endpoint — runs the agentic loop (authenticated, rate-limited, license-enforced)."""
+    _check_rate_limit(request.client.host)
+    chat_user_id = get_current_user(authorization)
+
+    # License enforcement: daily query limit
+    if license.daily_limit is not None and license.daily_used >= license.daily_limit:
+        return ChatResponse(
+            response=(
+                f"You've reached the free tier limit of {license.daily_limit} queries per day. "
+                "Upgrade to Pro for unlimited queries. Enter a license key in Settings."
+            ),
+            queries_executed=[],
+            tier=license.tier,
+            daily_used=license.daily_used,
+            daily_limit=license.daily_limit,
+        )
 
     # Pre-check: if any Databricks connection is configured, check warehouse state
     db_conn = get_first_databricks_conn()
@@ -907,20 +1270,23 @@ async def chat(req: ChatRequest):
                     "Please try again in a moment — the warehouse should be ready shortly."
                 ),
                 queries_executed=[],
+                tier=license.tier, daily_used=license.daily_used, daily_limit=license.daily_limit,
             )
         if wh["state"] not in ("RUNNING", "FORBIDDEN") and wh["state"] not in ("NOT_CONFIGURED",):
             return ChatResponse(
                 response=f"Databricks warehouse issue: {wh['message']}",
                 queries_executed=[],
+                tier=license.tier, daily_used=license.daily_used, daily_limit=license.daily_limit,
             )
 
     # Discover schema if not cached
     discovered = await discover_schema()
 
-    # Build system prompt
+    # Build system prompt with tier-appropriate chart types
     system = build_system_prompt(
         discovered,
         extra_ctx=req.extra_context,
+        allowed_charts=license.allowed_charts,
     )
 
     # Data-only reminder injected into every user message
@@ -941,8 +1307,12 @@ async def chat(req: ChatRequest):
         sql_blocks = re.findall(r"```sql_exec(?:\s+connection=(\S+))?\n(.*?)```", ai_text, re.DOTALL)
 
         if not sql_blocks:
-            # No SQL — final response
-            return ChatResponse(response=ai_text, queries_executed=queries_executed)
+            # No SQL — final response; record usage
+            await asyncio.to_thread(record_usage, license.key, request.client.host, "chat", chat_user_id)
+            return ChatResponse(
+                response=ai_text, queries_executed=queries_executed,
+                tier=license.tier, daily_used=license.daily_used + 1, daily_limit=license.daily_limit,
+            )
 
         # Execute each SQL query
         results_text = ""
@@ -961,16 +1331,17 @@ async def chat(req: ChatRequest):
             "content": f"[SYSTEM: SQL query results]\n{results_text}\n\nReport these results factually. ONLY state what the numbers show — do NOT add background info, project descriptions, strategic significance, or any knowledge not in the query results above. If the data answers the question, present it and stop. Only output more sql_exec blocks if you need additional data.",
         })
 
-    # If we exhausted loops, return last AI response
-    return ChatResponse(response=ai_text, queries_executed=queries_executed)
+    # If we exhausted loops, return last AI response; record usage
+    await asyncio.to_thread(record_usage, license.key, request.client.host, "chat", chat_user_id)
+    return ChatResponse(
+        response=ai_text, queries_executed=queries_executed,
+        tier=license.tier, daily_used=license.daily_used + 1, daily_limit=license.daily_limit,
+    )
 
 
 @app.post("/config")
-async def update_config(req: ConfigUpdate):
-    """Update runtime configuration (password-protected). Does NOT handle connections."""
-    if req.password != SETTINGS_PASSWORD:
-        raise HTTPException(status_code=403, detail="Invalid password.")
-
+async def update_config(req: ConfigUpdate, _auth=Depends(require_auth)):
+    """Update runtime configuration (authenticated). Does NOT handle connections."""
     global OPENROUTER_API_KEY, LLM_MODEL, EXTRA_CONTEXT, _schema_cache
 
     if req.openrouter_api_key is not None:
@@ -986,11 +1357,8 @@ async def update_config(req: ConfigUpdate):
 
 
 @app.get("/config")
-async def get_config(password: str = Query(...)):
-    """Retrieve current configuration (password-protected)."""
-    if password != SETTINGS_PASSWORD:
-        raise HTTPException(status_code=403, detail="Invalid password.")
-
+async def get_config(_auth=Depends(require_auth)):
+    """Retrieve current configuration (authenticated)."""
     return {
         "openrouter_api_key": OPENROUTER_API_KEY,
         "llm_model": LLM_MODEL,
@@ -1003,10 +1371,8 @@ async def get_config(password: str = Query(...)):
 # ── Connection CRUD endpoints ──
 
 @app.get("/connections")
-async def list_connections(password: str = Query(...)):
+async def list_connections(_auth=Depends(require_auth)):
     """List all configured connections (secrets redacted)."""
-    if password != SETTINGS_PASSWORD:
-        raise HTTPException(status_code=403, detail="Invalid password.")
     result = []
     for c in CONNECTIONS.values():
         d = dict(c)
@@ -1020,15 +1386,21 @@ async def list_connections(password: str = Query(...)):
 
 
 @app.post("/connections")
-async def save_all_connections_endpoint(req: dict):
-    """Replace all connections (password-protected).
+async def save_all_connections_endpoint(req: dict, _auth=Depends(require_auth), license: LicenseInfo = Depends(resolve_license_dep)):
+    """Replace all connections (authenticated, license-enforced).
     Detects redacted secrets and preserves originals."""
     global CONNECTIONS, _schema_cache
-    if req.get("password") != SETTINGS_PASSWORD:
-        raise HTTPException(status_code=403, detail="Invalid password.")
 
     old_conns = dict(CONNECTIONS)  # snapshot before overwriting
     new_conns = req.get("connections", [])
+
+    # License enforcement: connection limit
+    if license.max_connections is not None and len(new_conns) > license.max_connections:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Free tier allows {license.max_connections} connection(s). "
+                   f"You have {len(new_conns)}. Enter a Pro license key for unlimited connections."
+        )
     CONNECTIONS = {}
     for c in new_conns:
         cid = c.get("id") or _slugify(c.get("name", "conn"))
@@ -1052,8 +1424,8 @@ async def save_all_connections_endpoint(req: dict):
 
 
 @app.post("/test-connection/{connection_id}")
-async def test_single_connection(connection_id: str):
-    """Test a specific connection."""
+async def test_single_connection(connection_id: str, _auth=Depends(require_auth)):
+    """Test a specific connection (authenticated)."""
     if connection_id not in CONNECTIONS:
         raise HTTPException(status_code=404, detail=f"Connection '{connection_id}' not found.")
     conn = CONNECTIONS[connection_id]
@@ -1071,11 +1443,8 @@ async def test_single_connection(connection_id: str):
 
 
 @app.post("/upload-tmdl")
-async def upload_tmdl(req: TmdlUploadRequest):
-    """Accept uploaded .tmdl file contents and set as semantic model."""
-    if req.password != SETTINGS_PASSWORD:
-        raise HTTPException(status_code=403, detail="Invalid password.")
-
+async def upload_tmdl(req: TmdlUploadRequest, _auth=Depends(require_auth)):
+    """Accept uploaded .tmdl file contents and set as semantic model (authenticated)."""
     global SEMANTIC_MODEL, _schema_cache
 
     if not req.files:
@@ -1129,3 +1498,544 @@ async def test_connection():
         if result.startswith("ERROR"):
             raise HTTPException(status_code=500, detail=result)
         return {"status": "connected", "state": "RUNNING", "message": "Connected and ready."}
+
+
+# ══════════════════════════════════════════════════════════
+# AUTH ENDPOINTS (Supabase Auth)
+# ══════════════════════════════════════════════════════════
+class AuthSignupRequest(BaseModel):
+    email: str
+    password: str
+    display_name: str = ""
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class AuthRefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@app.post("/auth/signup")
+async def auth_signup(req: AuthSignupRequest):
+    """Sign up a new user via Supabase Auth, create user row + license key."""
+    if not _sb_users_ready:
+        raise HTTPException(status_code=503, detail="User management tables not configured.")
+    sb = _get_sb()
+    try:
+        auth_resp = sb.auth.sign_up({"email": req.email, "password": req.password})
+    except Exception as e:
+        msg = str(e)
+        if "already registered" in msg.lower() or "already been registered" in msg.lower():
+            raise HTTPException(status_code=409, detail="An account with this email already exists.")
+        raise HTTPException(status_code=400, detail=msg[:200])
+
+    user = auth_resp.user
+    if not user:
+        raise HTTPException(status_code=400, detail="Signup failed — no user returned.")
+
+    license_key = f"pbi-{uuid.uuid4()}"
+    try:
+        sb.table("users").insert({
+            "id": user.id,
+            "email": req.email,
+            "display_name": req.display_name or req.email.split("@")[0],
+            "tier": "free",
+            "license_key": license_key,
+        }).execute()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"User row creation failed: {str(e)[:200]}")
+
+    session = auth_resp.session
+    return {
+        "user_id": user.id,
+        "email": req.email,
+        "display_name": req.display_name or req.email.split("@")[0],
+        "tier": "free",
+        "license_key": license_key,
+        "access_token": session.access_token if session else None,
+        "refresh_token": session.refresh_token if session else None,
+    }
+
+
+@app.post("/auth/login")
+async def auth_login(req: AuthLoginRequest):
+    """Log in via Supabase Auth, return JWT + user profile."""
+    if not _sb_users_ready:
+        raise HTTPException(status_code=503, detail="User management tables not configured.")
+    sb = _get_sb()
+    try:
+        auth_resp = sb.auth.sign_in_with_password({"email": req.email, "password": req.password})
+    except Exception as e:
+        msg = str(e)
+        if "invalid" in msg.lower() or "credentials" in msg.lower():
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+        raise HTTPException(status_code=400, detail=msg[:200])
+
+    user = auth_resp.user
+    session = auth_resp.session
+    if not user or not session:
+        raise HTTPException(status_code=401, detail="Login failed.")
+
+    # Fetch user profile from users table
+    try:
+        profile_resp = sb.table("users").select("tier, license_key, display_name").eq("id", user.id).execute()
+        if profile_resp.data:
+            profile = profile_resp.data[0]
+        else:
+            # User exists in auth but not in users table — create row
+            license_key = f"pbi-{uuid.uuid4()}"
+            sb.table("users").insert({
+                "id": user.id,
+                "email": req.email,
+                "display_name": req.email.split("@")[0],
+                "tier": "free",
+                "license_key": license_key,
+            }).execute()
+            profile = {"tier": "free", "license_key": license_key, "display_name": req.email.split("@")[0]}
+    except Exception:
+        profile = {"tier": "free", "license_key": "", "display_name": ""}
+
+    return {
+        "user_id": user.id,
+        "email": req.email,
+        "tier": profile["tier"],
+        "license_key": profile["license_key"],
+        "display_name": profile.get("display_name", ""),
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+    }
+
+
+@app.post("/auth/refresh")
+async def auth_refresh(req: AuthRefreshRequest):
+    """Refresh the session using a refresh token."""
+    sb = _get_sb()
+    try:
+        auth_resp = sb.auth.refresh_session(req.refresh_token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+
+    session = auth_resp.session
+    if not session:
+        raise HTTPException(status_code=401, detail="Session refresh failed.")
+
+    return {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+    }
+
+
+@app.get("/auth/me")
+async def auth_me(user_id: str = Depends(require_user)):
+    """Get current user profile + subscription status."""
+    if not _sb_users_ready:
+        raise HTTPException(status_code=503, detail="User management tables not configured.")
+    sb = _get_sb()
+
+    # Fetch user profile
+    resp = sb.table("users").select("*").eq("id", user_id).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user = resp.data[0]
+
+    # Fetch active subscription
+    sub_data = None
+    try:
+        sub_resp = sb.table("subscriptions") \
+            .select("stripe_subscription_id, status, current_period_end, cancel_at_period_end") \
+            .eq("user_id", user_id) \
+            .in_("status", ["active", "trialing", "past_due"]) \
+            .limit(1) \
+            .execute()
+        if sub_resp.data:
+            sub_data = sub_resp.data[0]
+    except Exception:
+        pass
+
+    return {
+        "user_id": user["id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
+        "tier": user["tier"],
+        "license_key": user["license_key"],
+        "subscription": sub_data,
+        "created_at": user["created_at"],
+    }
+
+
+# ══════════════════════════════════════════════════════════
+# STRIPE BILLING ENDPOINTS
+# ══════════════════════════════════════════════════════════
+@app.post("/billing/create-checkout-session")
+async def billing_create_checkout(request: Request, user_id: str = Depends(require_user)):
+    """Create a Stripe Checkout session for Pro subscription."""
+    if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID:
+        raise HTTPException(status_code=503, detail="Stripe is not configured.")
+    if not _sb_users_ready:
+        raise HTTPException(status_code=503, detail="User management tables not configured.")
+
+    sb = _get_sb()
+    resp = sb.table("users").select("email, stripe_customer_id, tier").eq("id", user_id).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user = resp.data[0]
+
+    if user["tier"] == "pro":
+        raise HTTPException(status_code=400, detail="You are already on the Pro plan.")
+
+    # Get or create Stripe customer
+    customer_id = user.get("stripe_customer_id")
+    if not customer_id:
+        customer = stripe.Customer.create(
+            email=user["email"],
+            metadata={"user_id": user_id},
+        )
+        customer_id = customer.id
+        sb.table("users").update({"stripe_customer_id": customer_id}).eq("id", user_id).execute()
+
+    # Build success/cancel URLs (use Referer or Origin if available)
+    origin = request.headers.get("origin", request.headers.get("referer", ""))
+    if origin:
+        origin = origin.rstrip("/")
+    success_url = f"{origin}/?checkout=success" if origin else "https://pbichat.com/checkout-success"
+    cancel_url = f"{origin}/?checkout=cancel" if origin else "https://pbichat.com/checkout-cancel"
+
+    session = stripe.checkout.Session.create(
+        customer=customer_id,
+        mode="subscription",
+        line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"user_id": user_id},
+    )
+
+    return {"checkout_url": session.url, "session_id": session.id}
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """Handle Stripe webhook events."""
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhook secret not configured.")
+
+    body = await request.body()
+    sig = request.headers.get("stripe-signature")
+    if not sig:
+        raise HTTPException(status_code=400, detail="Missing Stripe signature.")
+
+    try:
+        event = stripe.Webhook.construct_event(body, sig, STRIPE_WEBHOOK_SECRET)
+    except stripe.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Webhook error: {str(e)[:200]}")
+
+    sb = _get_sb()
+    event_type = event["type"]
+    data = event["data"]["object"]
+
+    try:
+        if event_type == "checkout.session.completed":
+            await _handle_checkout_completed(sb, data)
+        elif event_type == "invoice.paid":
+            await _handle_invoice_paid(sb, data)
+        elif event_type == "invoice.payment_failed":
+            await _handle_invoice_failed(sb, data)
+        elif event_type == "customer.subscription.updated":
+            await _handle_subscription_updated(sb, data)
+        elif event_type == "customer.subscription.deleted":
+            await _handle_subscription_deleted(sb, data)
+    except Exception as e:
+        print(f"PBICHAT: Webhook handler error ({event_type}): {str(e)[:300]}")
+
+    return JSONResponse({"status": "ok"})
+
+
+async def _handle_checkout_completed(sb: SupabaseClient, session: dict):
+    """checkout.session.completed — create subscription record, upgrade to pro."""
+    user_id = session.get("metadata", {}).get("user_id")
+    customer_id = session.get("customer")
+    subscription_id = session.get("subscription")
+    if not user_id or not subscription_id:
+        return
+
+    # Fetch subscription details from Stripe
+    sub = stripe.Subscription.retrieve(subscription_id)
+
+    def _db():
+        # Create subscription record
+        sb.table("subscriptions").upsert({
+            "user_id": user_id,
+            "stripe_subscription_id": subscription_id,
+            "stripe_price_id": sub["items"]["data"][0]["price"]["id"] if sub["items"]["data"] else STRIPE_PRICE_ID,
+            "status": sub["status"],
+            "current_period_start": datetime.fromtimestamp(sub["current_period_start"], tz=timezone.utc).isoformat(),
+            "current_period_end": datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc).isoformat(),
+            "cancel_at_period_end": sub.get("cancel_at_period_end", False),
+        }, on_conflict="stripe_subscription_id").execute()
+
+        # Upgrade user to pro
+        update_data = {"tier": "pro", "updated_at": datetime.now(timezone.utc).isoformat()}
+        if customer_id:
+            update_data["stripe_customer_id"] = customer_id
+        sb.table("users").update(update_data).eq("id", user_id).execute()
+
+    await asyncio.to_thread(_db)
+    print(f"PBICHAT: User {user_id} upgraded to pro via checkout.")
+
+
+async def _handle_invoice_paid(sb: SupabaseClient, invoice: dict):
+    """invoice.paid — record payment, ensure pro tier."""
+    customer_id = invoice.get("customer")
+    subscription_id = invoice.get("subscription")
+    if not customer_id:
+        return
+
+    def _db():
+        # Find user by stripe_customer_id
+        user_resp = sb.table("users").select("id").eq("stripe_customer_id", customer_id).execute()
+        if not user_resp.data:
+            return
+        user_id = user_resp.data[0]["id"]
+
+        # Record payment
+        sb.table("payments").upsert({
+            "user_id": user_id,
+            "stripe_payment_id": invoice.get("payment_intent") or invoice["id"],
+            "stripe_subscription_id": subscription_id,
+            "amount_cents": invoice.get("amount_paid", 0),
+            "currency": invoice.get("currency", "usd"),
+            "status": invoice.get("status", "paid"),
+        }, on_conflict="stripe_payment_id").execute()
+
+        # Ensure pro tier
+        sb.table("users").update({
+            "tier": "pro",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", user_id).execute()
+
+    await asyncio.to_thread(_db)
+
+
+async def _handle_invoice_failed(sb: SupabaseClient, invoice: dict):
+    """invoice.payment_failed — downgrade to free."""
+    customer_id = invoice.get("customer")
+    if not customer_id:
+        return
+
+    def _db():
+        user_resp = sb.table("users").select("id").eq("stripe_customer_id", customer_id).execute()
+        if not user_resp.data:
+            return
+        user_id = user_resp.data[0]["id"]
+        sb.table("users").update({
+            "tier": "free",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", user_id).execute()
+
+    await asyncio.to_thread(_db)
+    print(f"PBICHAT: Payment failed for customer {customer_id}, downgraded to free.")
+
+
+async def _handle_subscription_updated(sb: SupabaseClient, sub: dict):
+    """customer.subscription.updated — sync status."""
+    subscription_id = sub.get("id")
+    if not subscription_id:
+        return
+
+    def _db():
+        update = {
+            "status": sub["status"],
+            "cancel_at_period_end": sub.get("cancel_at_period_end", False),
+            "current_period_start": datetime.fromtimestamp(sub["current_period_start"], tz=timezone.utc).isoformat(),
+            "current_period_end": datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if sub.get("canceled_at"):
+            update["canceled_at"] = datetime.fromtimestamp(sub["canceled_at"], tz=timezone.utc).isoformat()
+
+        sb.table("subscriptions").update(update).eq("stripe_subscription_id", subscription_id).execute()
+
+        # If subscription is no longer active, downgrade
+        if sub["status"] not in ("active", "trialing"):
+            sub_resp = sb.table("subscriptions").select("user_id").eq("stripe_subscription_id", subscription_id).execute()
+            if sub_resp.data:
+                sb.table("users").update({
+                    "tier": "free",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", sub_resp.data[0]["user_id"]).execute()
+
+    await asyncio.to_thread(_db)
+
+
+async def _handle_subscription_deleted(sb: SupabaseClient, sub: dict):
+    """customer.subscription.deleted — cancel + downgrade."""
+    subscription_id = sub.get("id")
+    if not subscription_id:
+        return
+
+    def _db():
+        now = datetime.now(timezone.utc).isoformat()
+        sb.table("subscriptions").update({
+            "status": "canceled",
+            "canceled_at": now,
+            "updated_at": now,
+        }).eq("stripe_subscription_id", subscription_id).execute()
+
+        sub_resp = sb.table("subscriptions").select("user_id").eq("stripe_subscription_id", subscription_id).execute()
+        if sub_resp.data:
+            sb.table("users").update({
+                "tier": "free",
+                "updated_at": now,
+            }).eq("id", sub_resp.data[0]["user_id"]).execute()
+
+    await asyncio.to_thread(_db)
+    print(f"PBICHAT: Subscription {subscription_id} deleted, user downgraded.")
+
+
+@app.post("/billing/cancel-subscription")
+async def billing_cancel(user_id: str = Depends(require_user)):
+    """Cancel the user's subscription at period end."""
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe is not configured.")
+    if not _sb_users_ready:
+        raise HTTPException(status_code=503, detail="User management tables not configured.")
+
+    sb = _get_sb()
+    sub_resp = sb.table("subscriptions") \
+        .select("stripe_subscription_id, status") \
+        .eq("user_id", user_id) \
+        .in_("status", ["active", "trialing", "past_due"]) \
+        .limit(1) \
+        .execute()
+
+    if not sub_resp.data:
+        raise HTTPException(status_code=404, detail="No active subscription found.")
+
+    subscription_id = sub_resp.data[0]["stripe_subscription_id"]
+
+    try:
+        stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to cancel: {str(e)[:200]}")
+
+    sb.table("subscriptions").update({
+        "cancel_at_period_end": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("stripe_subscription_id", subscription_id).execute()
+
+    return {"status": "canceled", "cancel_at_period_end": True}
+
+
+# ══════════════════════════════════════════════════════════
+# LICENSE STATUS (public — no auth required)
+# ══════════════════════════════════════════════════════════
+class LicenseStatusResponse(BaseModel):
+    tier: str
+    daily_used: int
+    daily_limit: Optional[int]
+    max_connections: Optional[int]
+    allowed_charts: list[str]
+
+@app.get("/license", response_model=LicenseStatusResponse)
+async def get_license_status(license: LicenseInfo = Depends(resolve_license_dep)):
+    """Check license tier and usage. No auth required — visual calls this on load."""
+    return LicenseStatusResponse(
+        tier=license.tier,
+        daily_used=license.daily_used,
+        daily_limit=license.daily_limit,
+        max_connections=license.max_connections,
+        allowed_charts=sorted(license.allowed_charts),
+    )
+
+
+# ══════════════════════════════════════════════════════════
+# LICENSE ADMIN ENDPOINTS (authenticated)
+# ══════════════════════════════════════════════════════════
+class LicenseCreateRequest(BaseModel):
+    label: str = ""
+    tier: str = "pro"
+    expires_at: Optional[str] = None  # ISO8601 or null
+    max_connections: Optional[int] = None
+
+class LicenseCreateResponse(BaseModel):
+    key: str
+    tier: str
+    label: str
+    created_at: str
+    expires_at: Optional[str]
+
+@app.post("/admin/licenses", response_model=LicenseCreateResponse)
+async def create_license(req: LicenseCreateRequest, _auth=Depends(require_auth)):
+    """Create a new license key (admin only)."""
+    key = f"pbi-{uuid.uuid4()}"
+    now = datetime.now(timezone.utc).isoformat()
+
+    def _insert():
+        sb = _get_sb()
+        sb.table("licenses").insert({
+            "key": key,
+            "tier": req.tier,
+            "label": req.label,
+            "created_at": now,
+            "expires_at": req.expires_at,
+            "max_connections": req.max_connections,
+        }).execute()
+
+    await asyncio.to_thread(_insert)
+    return LicenseCreateResponse(
+        key=key, tier=req.tier, label=req.label,
+        created_at=now, expires_at=req.expires_at,
+    )
+
+@app.get("/admin/licenses")
+async def list_licenses(_auth=Depends(require_auth)):
+    """List all license keys (admin only)."""
+    def _query():
+        sb = _get_sb()
+        resp = sb.table("licenses") \
+            .select("key, tier, label, created_at, expires_at, is_active, max_connections") \
+            .order("created_at", desc=True) \
+            .execute()
+        return resp.data
+
+    return {"licenses": await asyncio.to_thread(_query)}
+
+@app.delete("/admin/licenses/{license_key}")
+async def revoke_license(license_key: str, _auth=Depends(require_auth)):
+    """Revoke (deactivate) a license key (admin only)."""
+    def _revoke():
+        sb = _get_sb()
+        resp = sb.table("licenses") \
+            .update({"is_active": False}) \
+            .eq("key", license_key) \
+            .execute()
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="License key not found.")
+
+    await asyncio.to_thread(_revoke)
+    return {"status": "revoked", "key": license_key}
+
+@app.get("/admin/usage")
+async def get_usage_stats(days: int = 7, _auth=Depends(require_auth)):
+    """Get usage stats for the last N days (admin only)."""
+    def _query():
+        sb = _get_sb()
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        resp = sb.table("usage_log") \
+            .select("license_key, created_at") \
+            .gte("created_at", cutoff) \
+            .execute()
+        # Aggregate by license_key + day in Python (PostgREST doesn't support GROUP BY)
+        from collections import Counter
+        counts: Counter = Counter()
+        for row in resp.data:
+            day = row["created_at"][:10]
+            counts[(row.get("license_key"), day)] += 1
+        return [
+            {"license_key": k, "day": d, "queries": c}
+            for (k, d), c in sorted(counts.items(), key=lambda x: x[0][1], reverse=True)
+        ]
+
+    return {"usage": await asyncio.to_thread(_query)}
