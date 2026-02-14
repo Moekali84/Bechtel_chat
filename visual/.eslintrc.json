@@ -1,0 +1,6 @@
+{
+  "rules": {
+    "powerbi-visuals/no-inner-outer-html": "off",
+    "powerbi-visuals/no-http-string": "off"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "privileges": [
+    {
+      "name": "WebAccess",
+      "essential": true,
+      "parameters": ["https://*"]
+    }
+  ],
+  "supportsLandingPage": true,
+  "dataRoles": [],
+  "dataViewMappings": [],
+  "objects": {
+    "connection": {
+      "properties": {
+        "backendUrl": {
+          "type": { "text": true },
+          "displayName": "Backend API URL",
+          "description": "URL of your deployed PBIChat backend API (e.g. https://your-app.azurewebsites.net)"
+        }
+      }
+    }
+  }
+}

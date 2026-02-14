@@ -1,0 +1,30 @@
+{
+  "name": "pbichat",
+  "version": "1.0.0",
+  "description": "AI-powered chat assistant for Power BI with live SQL access",
+  "main": "src/visual.ts",
+  "author": "PBIChat",
+  "license": "SEE LICENSE IN EULA",
+  "homepage": "https://pbichat.com",
+  "scripts": {
+    "pbiviz": "pbiviz",
+    "start": "pbiviz start",
+    "package": "pbiviz package",
+    "lint": "eslint src/ --ext .ts",
+    "eslint": "npx eslint . --ext .js,.jsx,.ts,.tsx"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.0",
+    "powerbi-visuals-api": "~5.9.0",
+    "powerbi-visuals-utils-formattingmodel": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
+    "css-loader": "^6.9.0",
+    "style-loader": "^3.3.0",
+    "webpack": "^5.90.0",
+    "powerbi-visuals-tools": "^5.4.0"
+  }
+}
