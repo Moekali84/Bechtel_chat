@@ -1,29 +1,23 @@
 """
-PBIChat — Backend API
-Orchestrates the agentic loop: User question → LLM → SQL → Database → LLM → Response
-Deploy on Azure App Service, Azure Functions, or any Python host.
+Bechtel PBIChat — Backend API
+Orchestrates the agentic loop: User question -> LLM -> SQL -> Database -> LLM -> Response
+Single-user, local-config backend. No Supabase dependency.
 """
 
 import os
 import re
 import time
+import logging
 import asyncio
-import secrets
-import uuid
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from dataclasses import dataclass, field
-from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 import httpx
-import jwt
-import stripe
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Depends, Header
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 from typing import Optional
-from supabase import create_client, Client as SupabaseClient
 import json
 
 ENV_PATH = Path(__file__).parent / ".env"
@@ -34,8 +28,6 @@ app = FastAPI(title="PBIChat API")
 # ══════════════════════════════════════════════════════════
 # CORS — restrict to your Power BI domain in production
 # ══════════════════════════════════════════════════════════
-# In production, replace ["*"] with specific origins:
-#   allow_origins=["https://app.powerbi.com", "https://your-company.powerbi.com"]
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -64,321 +56,116 @@ def _check_rate_limit(client_ip: str):
 # ══════════════════════════════════════════════════════════
 # CONFIG — Set via environment variables or .env file
 # ══════════════════════════════════════════════════════════
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "anthropic/claude-sonnet-4")
-_raw_db_host = os.getenv("DATABRICKS_HOST", "").strip()
-DATABRICKS_HOST = _raw_db_host if not _raw_db_host or _raw_db_host.startswith("http") else f"https://{_raw_db_host}"
-DATABRICKS_HTTP_PATH = os.getenv("DATABRICKS_HTTP_PATH", "")  # /sql/1.0/warehouses/xxx
-DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "")
-DATABRICKS_CATALOG_SCHEMA = os.getenv("DATABRICKS_CATALOG_SCHEMA", "")  # e.g. silver_poland_nonprod.iris
-SEMANTIC_MODEL_FILE = ENV_PATH.parent / "semantic_model.txt"
-# Load semantic model from file if it exists, otherwise fall back to .env value
-if SEMANTIC_MODEL_FILE.exists():
-    SEMANTIC_MODEL = SEMANTIC_MODEL_FILE.read_text()
-else:
-    SEMANTIC_MODEL = os.getenv("SEMANTIC_MODEL", "")
-EXTRA_CONTEXT = os.getenv("EXTRA_CONTEXT", "")
-SETTINGS_PASSWORD = os.getenv("SETTINGS_PASSWORD", "")
+# Read-only defaults from env — Azure OpenAI (Bechtel)
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.2")
 
 # ══════════════════════════════════════════════════════════
-# AUTHENTICATION — password via X-Auth-Password header
+# LOCAL FILE-BASED CONFIG (replaces Supabase)
 # ══════════════════════════════════════════════════════════
-def require_auth(x_auth_password: str = Header(..., alias="X-Auth-Password")):
-    """Dependency: validates the settings password sent via header."""
-    if not SETTINGS_PASSWORD:
-        raise HTTPException(status_code=500, detail="SETTINGS_PASSWORD not configured on the server. Set it in .env.")
-    if not secrets.compare_digest(x_auth_password, SETTINGS_PASSWORD):
-        raise HTTPException(status_code=403, detail="Invalid password.")
+CONFIG_PATH = Path(__file__).parent / "config.json"
+SEMANTIC_MODEL_PATH = Path(__file__).parent / "semantic_model.txt"
 
 
-def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[str]:
-    """Dependency: decode Supabase JWT and return user_id, or None."""
-    if not authorization or not authorization.startswith("Bearer "):
-        return None
-    token = authorization[7:]
-    if not SUPABASE_JWT_SECRET:
-        return None
+def _load_config() -> dict:
     try:
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-        return payload.get("sub")
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        return None
-
-
-def require_user(authorization: Optional[str] = Header(None)) -> str:
-    """Dependency: like get_current_user but raises 401 if not authenticated."""
-    user_id = get_current_user(authorization)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required. Please log in.")
-    return user_id
-
-
-# ══════════════════════════════════════════════════════════
-# LICENSE DATABASE (Supabase)
-# ══════════════════════════════════════════════════════════
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
-
-# Stripe configuration
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
-if STRIPE_SECRET_KEY:
-    stripe.api_key = STRIPE_SECRET_KEY
-
-_supabase: Optional[SupabaseClient] = None
-
-def _get_sb() -> SupabaseClient:
-    """Get the Supabase client (lazy-initialized)."""
-    global _supabase
-    if _supabase is None:
-        if not SUPABASE_URL or not SUPABASE_KEY:
-            raise HTTPException(status_code=500, detail="SUPABASE_URL and SUPABASE_KEY must be set in .env")
-        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return _supabase
-
-_INIT_SQL = """
-CREATE TABLE IF NOT EXISTS licenses (
-    key             TEXT PRIMARY KEY,
-    tier            TEXT NOT NULL DEFAULT 'pro',
-    label           TEXT NOT NULL DEFAULT '',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at      TIMESTAMPTZ,
-    is_active       BOOLEAN NOT NULL DEFAULT true,
-    max_connections INTEGER DEFAULT NULL
-);
-
-CREATE TABLE IF NOT EXISTS usage_log (
-    id              BIGSERIAL PRIMARY KEY,
-    license_key     TEXT,
-    user_id         TEXT,
-    client_ip       TEXT NOT NULL,
-    endpoint        TEXT NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_usage_day
-    ON usage_log (license_key, created_at);
-CREATE INDEX IF NOT EXISTS idx_usage_user
-    ON usage_log (user_id, created_at);
-"""
-
-_sb_tables_ready = False
-
-_sb_users_ready = False
-
-def _init_db():
-    """Check if license tables exist in Supabase. Print setup SQL if missing."""
-    global _sb_tables_ready, _sb_users_ready
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        print("PBICHAT: SUPABASE_URL/SUPABASE_KEY not set — licensing disabled.")
-        return
-    try:
-        sb = _get_sb()
-        sb.table("licenses").select("key", count="exact").limit(0).execute()
-        sb.table("usage_log").select("id", count="exact").limit(0).execute()
-        _sb_tables_ready = True
-        print("PBICHAT: Supabase license tables OK.")
-    except Exception as e:
-        err = str(e)
-        if "could not find" in err.lower() or "does not exist" in err.lower() or "PGRST" in err:
-            print("\n" + "=" * 60)
-            print("PBICHAT: License tables not found in Supabase.")
-            print("Run this SQL in your Supabase SQL Editor")
-            print(f"  ({SUPABASE_URL.replace('.co', '.co/project/')}/sql/new):")
-            print("=" * 60)
-            print(_INIT_SQL)
-            print("=" * 60 + "\n")
-        else:
-            print(f"PBICHAT: Supabase connection error: {err[:200]}")
-
-    # Probe user management tables (graceful if missing)
-    try:
-        sb = _get_sb()
-        sb.table("users").select("id", count="exact").limit(0).execute()
-        sb.table("subscriptions").select("id", count="exact").limit(0).execute()
-        sb.table("payments").select("id", count="exact").limit(0).execute()
-        _sb_users_ready = True
-        print("PBICHAT: Supabase user/billing tables OK.")
+        if CONFIG_PATH.exists():
+            return json.loads(CONFIG_PATH.read_text())
     except Exception:
-        print("PBICHAT: User/billing tables not found — auth/billing endpoints disabled until tables are created.")
+        pass
+    return {"extra_context": "", "connections": [], "llm_model": ""}
 
-_init_db()
 
-# ══════════════════════════════════════════════════════════
-# LICENSING — tier definitions and validation
-# ══════════════════════════════════════════════════════════
-FREE_DAILY_QUERY_LIMIT = int(os.getenv("FREE_DAILY_QUERY_LIMIT", "5"))
-FREE_MAX_CONNECTIONS = 1
-FREE_CHART_TYPES = {"bar", "line", "pie"}
+def _save_config(config: dict) -> None:
+    CONFIG_PATH.write_text(json.dumps(config, indent=2))
+
+
+def _load_semantic_model() -> str:
+    try:
+        if SEMANTIC_MODEL_PATH.exists():
+            return SEMANTIC_MODEL_PATH.read_text()
+    except Exception:
+        pass
+    return ""
+
+
+def _save_semantic_model(content: str) -> None:
+    SEMANTIC_MODEL_PATH.write_text(content)
+
+
+# All chart types — licensing is handled by the visual via Microsoft's Licensing API.
 ALL_CHART_TYPES = {"bar", "line", "pie", "doughnut", "scatter", "horizontalBar"}
 
+
+# ══════════════════════════════════════════════════════════
+# USER CONTEXT — loaded from local config files
+# ══════════════════════════════════════════════════════════
 @dataclass
-class LicenseInfo:
-    """Resolved license state for the current request."""
-    tier: str                           # "free" or "pro"
-    key: Optional[str]                  # None for free tier
-    label: str                          # "" for free
-    daily_used: int                     # queries used today
-    daily_limit: Optional[int]          # None = unlimited
-    max_connections: Optional[int]      # None = unlimited
-    allowed_charts: set = field(default_factory=lambda: FREE_CHART_TYPES)
+class UserContext:
+    user_id: str
+    extra_context: str = ""
+    connections: dict[str, dict] = field(default_factory=dict)
+    llm_model: str = ""            # empty = use global default
+    semantic_model: str = ""       # loaded from semantic_model.txt
 
-def resolve_license(license_key: Optional[str], client_ip: str, user_id: Optional[str] = None) -> LicenseInfo:
-    """Look up a license key and return its tier + usage.
-    Checks users.license_key first (new system), then falls back to licenses table."""
-    if not _sb_tables_ready:
-        # Supabase not configured or tables missing — default to unlimited (no enforcement)
-        return LicenseInfo(
-            tier="pro", key=None, label="(no license DB)",
-            daily_used=0, daily_limit=None, max_connections=None,
-            allowed_charts=ALL_CHART_TYPES,
-        )
+    @property
+    def effective_llm_model(self) -> str:
+        return self.llm_model or LLM_MODEL
 
-    sb = _get_sb()
-    today = date.today().isoformat()
 
-    # ── New system: check users table first ──
-    if license_key and _sb_users_ready:
-        try:
-            resp = sb.table("users").select("id, email, tier, license_key").eq("license_key", license_key).execute()
-            if resp.data:
-                user = resp.data[0]
-                uid = user["id"]
-                tier = user["tier"]
-                if tier == "pro":
-                    return LicenseInfo(
-                        tier="pro", key=license_key, label=user["email"],
-                        daily_used=0, daily_limit=None, max_connections=None,
-                        allowed_charts=ALL_CHART_TYPES,
-                    )
-                # Free tier with account — count usage by user_id
-                usage_resp = sb.table("usage_log") \
-                    .select("id", count="exact") \
-                    .eq("user_id", uid) \
-                    .gte("created_at", today) \
-                    .execute()
-                used = usage_resp.count if usage_resp.count is not None else 0
-                return LicenseInfo(
-                    tier="free", key=license_key, label=user["email"],
-                    daily_used=used,
-                    daily_limit=FREE_DAILY_QUERY_LIMIT,
-                    max_connections=FREE_MAX_CONNECTIONS,
-                    allowed_charts=FREE_CHART_TYPES,
-                )
-        except Exception:
-            pass  # Fall through to legacy lookup
-
-    if not license_key:
-        # Free tier — count today's usage by user_id (if logged in) or IP
-        if user_id and _sb_users_ready:
-            resp = sb.table("usage_log") \
-                .select("id", count="exact") \
-                .eq("user_id", user_id) \
-                .gte("created_at", today) \
-                .execute()
-        else:
-            resp = sb.table("usage_log") \
-                .select("id", count="exact") \
-                .is_("license_key", "null") \
-                .is_("user_id", "null") \
-                .eq("client_ip", client_ip) \
-                .gte("created_at", today) \
-                .execute()
-        used = resp.count if resp.count is not None else 0
-
-        return LicenseInfo(
-            tier="free", key=None, label="",
-            daily_used=used,
-            daily_limit=FREE_DAILY_QUERY_LIMIT,
-            max_connections=FREE_MAX_CONNECTIONS,
-            allowed_charts=FREE_CHART_TYPES,
-        )
-
-    # ── Legacy: Validate key in licenses table ──
-    resp = sb.table("licenses").select("*").eq("key", license_key).execute()
-    if not resp.data:
-        raise HTTPException(status_code=403, detail="Invalid license key.")
-
-    lic = resp.data[0]
-
-    if not lic["is_active"]:
-        raise HTTPException(status_code=403, detail="License key has been revoked.")
-
-    if lic.get("expires_at"):
-        exp = datetime.fromisoformat(lic["expires_at"])
-        if datetime.now(timezone.utc) > exp:
-            raise HTTPException(status_code=403, detail="License key has expired.")
-
-    return LicenseInfo(
-        tier=lic["tier"],
-        key=license_key,
-        label=lic["label"],
-        daily_used=0,
-        daily_limit=None,
-        max_connections=lic.get("max_connections"),
-        allowed_charts=ALL_CHART_TYPES,
+def get_user_context() -> UserContext:
+    """Load user context from local config files."""
+    config = _load_config()
+    ctx = UserContext(
+        user_id="local",
+        extra_context=config.get("extra_context", ""),
+        llm_model=config.get("llm_model", ""),
+        semantic_model=_load_semantic_model(),
     )
-
-def record_usage(license_key: Optional[str], client_ip: str, endpoint: str, user_id: Optional[str] = None):
-    """Record a usage event in Supabase."""
-    if not _sb_tables_ready:
-        return
-    sb = _get_sb()
-    row = {
-        "license_key": license_key,
-        "client_ip": client_ip,
-        "endpoint": endpoint,
-    }
-    if user_id:
-        row["user_id"] = user_id
-    sb.table("usage_log").insert(row).execute()
-
-async def resolve_license_dep(
-    request: Request,
-    x_license_key: Optional[str] = Header(None, alias="X-License-Key"),
-    authorization: Optional[str] = Header(None),
-) -> LicenseInfo:
-    """Dependency that resolves the license for the current request."""
-    client_ip = request.client.host
-    user_id = get_current_user(authorization)
-    return await asyncio.to_thread(resolve_license, x_license_key, client_ip, user_id)
+    for c in config.get("connections", []):
+        cid = c.get("id")
+        if cid:
+            ctx.connections[cid] = c
+    return ctx
 
 
-def save_env():
-    """Persist current config values to the .env file.
-    Semantic model content goes to a separate file (too large for .env)."""
-    lines = [
-        "# PBIChat — Environment Variables",
-        "",
-        f"OPENROUTER_API_KEY={OPENROUTER_API_KEY}",
-        f"LLM_MODEL={LLM_MODEL}",
-        "",
-        f"EXTRA_CONTEXT={EXTRA_CONTEXT}",
-        "",
-        f"SETTINGS_PASSWORD={SETTINGS_PASSWORD}",
-        "",
-        f"SUPABASE_URL={SUPABASE_URL}",
-        f"SUPABASE_KEY={SUPABASE_KEY}",
-        "",
-        f"SUPABASE_JWT_SECRET={SUPABASE_JWT_SECRET}",
-        "",
-        f"STRIPE_SECRET_KEY={STRIPE_SECRET_KEY}",
-        f"STRIPE_PUBLISHABLE_KEY={STRIPE_PUBLISHABLE_KEY}",
-        f"STRIPE_WEBHOOK_SECRET={STRIPE_WEBHOOK_SECRET}",
-        f"STRIPE_PRICE_ID={STRIPE_PRICE_ID}",
-        "",
-    ]
-    ENV_PATH.write_text("\n".join(lines))
-    # Save semantic model to separate file
-    SEMANTIC_MODEL_FILE.write_text(SEMANTIC_MODEL)
+# ══════════════════════════════════════════════════════════
+# SCHEMA CACHE (keyed by conn_id, 5-min TTL, LRU 1000)
+# ══════════════════════════════════════════════════════════
+_SCHEMA_CACHE_TTL = 300  # 5 minutes
+_SCHEMA_CACHE_MAX = 1000
+
+_user_schema_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
+
+
+def _get_cached_schema(conn_id: str) -> str | None:
+    """Return cached schema text if still valid, else None."""
+    key = conn_id
+    entry = _user_schema_cache.get(key)
+    if entry is None:
+        return None
+    ts, text = entry
+    if time.time() - ts > _SCHEMA_CACHE_TTL:
+        _user_schema_cache.pop(key, None)
+        return None
+    # Move to end (most recently used)
+    _user_schema_cache.move_to_end(key)
+    return text
+
+
+def _set_cached_schema(conn_id: str, text: str) -> None:
+    """Cache schema text with current timestamp. Evict LRU if over limit."""
+    key = conn_id
+    _user_schema_cache[key] = (time.time(), text)
+    _user_schema_cache.move_to_end(key)
+    while len(_user_schema_cache) > _SCHEMA_CACHE_MAX:
+        _user_schema_cache.popitem(last=False)
+
+
+def _invalidate_all_schema() -> None:
+    """Remove all cached schemas."""
+    _user_schema_cache.clear()
 
 
 # ══════════════════════════════════════════════════════════
@@ -389,8 +176,8 @@ def _extract_source_from_block(text: str) -> dict:
 
     Handles two formats:
     1. Value.NativeQuery with SQL: "select * from catalog.schema.table ..."
-    2. Navigation-style: Source{[Name="catalog",Kind="Database"]}[Data] →
-       schema{[Name="schema",Kind="Schema"]}[Data] →
+    2. Navigation-style: Source{[Name="catalog",Kind="Database"]}[Data] ->
+       schema{[Name="schema",Kind="Schema"]}[Data] ->
        table{[Name="view_name",Kind="View"]}[Data]
     """
     entry: dict = {}
@@ -502,6 +289,15 @@ class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []
     extra_context: Optional[str] = None
+    inline_data: Optional[str] = None   # CSV from Power BI field wells
+    inline_stats: Optional[str] = None  # JSON summary stats from ALL rows
+
+    @field_validator("inline_data")
+    @classmethod
+    def inline_data_limit(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 500000:
+            raise ValueError("Inline data too large (max 500,000 characters).")
+        return v
 
     @field_validator("message")
     @classmethod
@@ -515,12 +311,8 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     queries_executed: list[dict] = []  # {sql, result, error} for transparency
-    tier: str = "free"
-    daily_used: Optional[int] = None
-    daily_limit: Optional[int] = None
 
 class ConfigUpdate(BaseModel):
-    openrouter_api_key: Optional[str] = None
     llm_model: Optional[str] = None
     extra_context: Optional[str] = None
 
@@ -530,6 +322,7 @@ class TmdlFile(BaseModel):
 
 class TmdlUploadRequest(BaseModel):
     files: list[TmdlFile]
+    connections: Optional[list] = None  # Per-report connections saved alongside the model
 
 class HealthResponse(BaseModel):
     status: str
@@ -543,61 +336,16 @@ class WarehouseStatusResponse(BaseModel):
     ready: bool = False  # True only when state == RUNNING
 
 
+
 # ══════════════════════════════════════════════════════════
-# MULTI-CONNECTION SUPPORT
+# MULTI-CONNECTION SUPPORT (loaded from local config)
 # ══════════════════════════════════════════════════════════
-CONNECTIONS_FILE = Path(__file__).parent / "connections.json"
-CONNECTIONS: dict[str, dict] = {}  # keyed by connection id
 
 
 def _slugify(name: str) -> str:
     """Generate a URL-safe id from a connection name."""
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug or "conn"
-
-
-def load_connections():
-    """Load connections from JSON file. Migrate from .env if needed."""
-    global CONNECTIONS
-    if CONNECTIONS_FILE.exists():
-        try:
-            data = json.loads(CONNECTIONS_FILE.read_text())
-            for c in data.get("connections", []):
-                if "id" in c:
-                    CONNECTIONS[c["id"]] = c
-        except (json.JSONDecodeError, KeyError):
-            pass
-    elif DATABRICKS_HOST:
-        # Auto-migrate from existing .env DATABRICKS_* values
-        conn = {
-            "id": "databricks-default",
-            "name": "Databricks",
-            "type": "databricks",
-            "host": DATABRICKS_HOST,
-            "http_path": DATABRICKS_HTTP_PATH,
-            "token": DATABRICKS_TOKEN,
-            "catalog_schema": DATABRICKS_CATALOG_SCHEMA,
-        }
-        CONNECTIONS[conn["id"]] = conn
-        save_connections()
-
-
-def save_connections():
-    """Persist connections to JSON file."""
-    data = {"connections": list(CONNECTIONS.values())}
-    CONNECTIONS_FILE.write_text(json.dumps(data, indent=2))
-
-
-def get_first_databricks_conn() -> dict | None:
-    """Return the first Databricks connection, or None."""
-    for c in CONNECTIONS.values():
-        if c.get("type") == "databricks":
-            return c
-    return None
-
-
-# Load connections at startup
-load_connections()
 
 
 # ══════════════════════════════════════════════════════════
@@ -608,15 +356,16 @@ _BLOCKED_SQL = re.compile(
     re.IGNORECASE,
 )
 
-async def execute_sql(sql: str, connection_id: str = None) -> str:
+async def execute_sql(sql: str, connections: dict[str, dict] = None, connection_id: str = None) -> str:
     """Execute SQL against a named connection (or the first available one).
     Only SELECT, SHOW, DESCRIBE, and EXPLAIN statements are allowed."""
+    conns = connections or {}
     if _BLOCKED_SQL.match(sql.strip()):
         return "ERROR: Only read-only queries (SELECT, SHOW, DESCRIBE) are allowed. Destructive operations are blocked."
-    if connection_id and connection_id in CONNECTIONS:
-        conn = CONNECTIONS[connection_id]
-    elif CONNECTIONS:
-        conn = next(iter(CONNECTIONS.values()))
+    if connection_id and connection_id in conns:
+        conn = conns[connection_id]
+    elif conns:
+        conn = next(iter(conns.values()))
     else:
         return "ERROR: No data connections configured."
 
@@ -766,8 +515,6 @@ _STATE_MESSAGES = {
 
 async def get_warehouse_state(conn: dict = None) -> dict:
     """Check warehouse state via REST API. Accepts a specific Databricks connection dict."""
-    if conn is None:
-        conn = get_first_databricks_conn()
     if not conn:
         return {"state": "NOT_CONFIGURED", "name": "", "message": "No Databricks connections configured."}
 
@@ -796,6 +543,17 @@ async def get_warehouse_state(conn: dict = None) -> dict:
 
             data = resp.json()
             state = data.get("state", "UNKNOWN")
+
+            # Auto-start warehouse if stopped
+            if state == "STOPPED":
+                try:
+                    start_url = f"{host.rstrip('/')}/api/2.0/sql/warehouses/{warehouse_id}/start"
+                    await client.post(start_url, headers={"Authorization": f"Bearer {token}"})
+                    logging.info(f"Sent START command to warehouse {warehouse_id}")
+                    state = "STARTING"
+                except Exception as e:
+                    logging.warning(f"Failed to start warehouse {warehouse_id}: {e}")
+
             return {
                 "state": state,
                 "name": data.get("name", ""),
@@ -810,24 +568,21 @@ async def get_warehouse_state(conn: dict = None) -> dict:
 # ══════════════════════════════════════════════════════════
 # SCHEMA DISCOVERY
 # ══════════════════════════════════════════════════════════
-_schema_cache: dict[str, str] = {}
-
-async def discover_schema() -> str:
+async def discover_schema(ctx: UserContext) -> str:
     """Auto-discover tables and columns from all connections.
     Uses TMDL-parsed catalog mappings when available so tables in
     different catalogs are described with fully-qualified names."""
-    global _schema_cache
-
-    if not CONNECTIONS:
+    if not ctx.connections:
         return ""
 
     # Get catalog mappings from TMDL content
-    table_sources = parse_table_sources(SEMANTIC_MODEL) if SEMANTIC_MODEL else {}
+    table_sources = parse_table_sources(ctx.semantic_model) if ctx.semantic_model else {}
     all_schema = ""
 
-    for conn_id, conn in CONNECTIONS.items():
-        if conn_id in _schema_cache:
-            all_schema += _schema_cache[conn_id]
+    for conn_id, conn in ctx.connections.items():
+        cached = _get_cached_schema(conn_id)
+        if cached is not None:
+            all_schema += cached
             continue
 
         ctype = conn.get("type", "databricks")
@@ -837,10 +592,10 @@ async def discover_schema() -> str:
             if ctype == "databricks":
                 catalog_schema = conn.get("catalog_schema", "")
                 sql = f"SHOW TABLES IN {catalog_schema}" if catalog_schema else "SHOW TABLES"
-                tables_result = await execute_sql(sql, connection_id=conn_id)
+                tables_result = await execute_sql(sql, connections=ctx.connections, connection_id=conn_id)
                 if tables_result.startswith("ERROR"):
                     section += f"(Discovery failed: {tables_result})\n\n"
-                    _schema_cache[conn_id] = section
+                    _set_cached_schema(conn_id, section)
                     all_schema += section
                     continue
 
@@ -857,7 +612,7 @@ async def discover_schema() -> str:
                 for tn in table_names[:25]:
                     try:
                         prefix = f"{catalog_schema}." if catalog_schema else ""
-                        desc = await execute_sql(f"DESCRIBE TABLE {prefix}{tn}", connection_id=conn_id)
+                        desc = await execute_sql(f"DESCRIBE TABLE {prefix}{tn}", connections=ctx.connections, connection_id=conn_id)
                         section += f"### {tn}\n{desc}\n\n"
                     except Exception:
                         section += f"### {tn} (could not describe)\n\n"
@@ -873,20 +628,21 @@ async def discover_schema() -> str:
                     if cat and sch:
                         fqn = f"{cat}.{sch}.{src}"
                         try:
-                            desc = await execute_sql(f"DESCRIBE TABLE {fqn}", connection_id=conn_id)
+                            desc = await execute_sql(f"DESCRIBE TABLE {fqn}", connections=ctx.connections, connection_id=conn_id)
                             section += f"### {tname} (source: `{fqn}`)\n{desc}\n\n"
                             described.add(tname.lower())
                         except Exception:
-                            section += f"### {tname} (source: `{fqn}` — could not describe)\n\n"
+                            section += f"### {tname} (source: `{fqn}` -- could not describe)\n\n"
 
             elif ctype == "sqlserver":
                 tables_result = await execute_sql(
                     "SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_SCHEMA, TABLE_NAME",
+                    connections=ctx.connections,
                     connection_id=conn_id,
                 )
                 if tables_result.startswith("ERROR"):
                     section += f"(Discovery failed: {tables_result})\n\n"
-                    _schema_cache[conn_id] = section
+                    _set_cached_schema(conn_id, section)
                     all_schema += section
                     continue
 
@@ -901,6 +657,7 @@ async def discover_schema() -> str:
                         try:
                             desc = await execute_sql(
                                 f"SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='{schema_name}' AND TABLE_NAME='{table_name}' ORDER BY ORDINAL_POSITION",
+                                connections=ctx.connections,
                                 connection_id=conn_id,
                             )
                             section += f"### [{schema_name}].[{table_name}]\n{desc}\n\n"
@@ -910,7 +667,7 @@ async def discover_schema() -> str:
         except Exception as e:
             section += f"(Discovery failed: {e})\n\n"
 
-        _schema_cache[conn_id] = section
+        _set_cached_schema(conn_id, section)
         all_schema += section
 
     return all_schema
@@ -919,37 +676,96 @@ async def discover_schema() -> str:
 # ══════════════════════════════════════════════════════════
 # SYSTEM PROMPT BUILDER
 # ══════════════════════════════════════════════════════════
-def _match_table_to_connection(table_info: dict) -> str:
+def _match_table_to_connection(table_info: dict, connections: dict[str, dict]) -> str:
     """Match a TMDL table source to a connection ID by comparing hostnames."""
     host = table_info.get("host", "")
     if not host:
         # Default to first Databricks connection
-        db_conn = get_first_databricks_conn()
-        return db_conn["id"] if db_conn else ""
+        for cid, c in connections.items():
+            if c.get("type") == "databricks":
+                return cid
+        return ""
     # Normalize and compare
     host_clean = host.replace("https://", "").replace("http://", "").rstrip("/").lower()
-    for cid, conn in CONNECTIONS.items():
+    for cid, conn in connections.items():
         if conn.get("type") != "databricks":
             continue
         conn_host = conn.get("host", "").replace("https://", "").replace("http://", "").rstrip("/").lower()
         if host_clean == conn_host or host_clean in conn_host or conn_host in host_clean:
             return cid
-    # No match — return first Databricks
-    db_conn = get_first_databricks_conn()
-    return db_conn["id"] if db_conn else ""
+    # No match -- return first Databricks
+    for cid, c in connections.items():
+        if c.get("type") == "databricks":
+            return cid
+    return ""
 
 
-def build_system_prompt(discovered_schema: str, extra_ctx: str = "", allowed_charts: Optional[set] = None) -> str:
-    p = """You are "PBIChat" — a data query tool with live SQL access to one or more database connections.
+# Regex for culture/locale TMDL files: "en-US.tmdl", "fr-FR.tmdl", etc.
+_CULTURE_FILE_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?\.tmdl$")
 
-## #1 RULE — DATA ONLY, ZERO OUTSIDE KNOWLEDGE (READ THIS FIRST)
+# Lines to strip from TMDL content (not useful for SQL generation)
+_TMDL_STRIP_RE = re.compile(
+    r"^\s*(lineageTag:|sourceLineageTag:|summarizeBy:|annotation |changedProperty )",
+)
+
+
+def _slim_tmdl(raw: str, max_chars: int = 400_000) -> str:
+    """Reduce TMDL content size for the LLM system prompt.
+
+    1. Remove entire culture file sections (en-US.tmdl, fr-FR.tmdl, etc.)
+    2. Strip non-essential metadata lines (lineageTag, annotation, summarizeBy)
+    3. Collapse consecutive blank lines
+    4. Truncate to max_chars if still too large
+    """
+    # Remove culture file sections
+    sections = re.split(r"(^=== .+? ===$)", raw, flags=re.MULTILINE)
+    kept: list[str] = []
+    skip = False
+    for part in sections:
+        if part.startswith("=== ") and part.endswith(" ==="):
+            fname = part[4:-4].split("/")[-1]  # handle both "cultures/en-US.tmdl" and "en-US.tmdl"
+            if _CULTURE_FILE_RE.match(fname):
+                skip = True
+                continue
+            skip = False
+            kept.append(part)
+        elif not skip:
+            kept.append(part)
+    joined = "".join(kept)
+
+    # Strip metadata lines and collapse blank lines
+    out: list[str] = []
+    prev_blank = False
+    for line in joined.split("\n"):
+        if _TMDL_STRIP_RE.match(line):
+            continue
+        if not line.strip():
+            if prev_blank:
+                continue
+            prev_blank = True
+        else:
+            prev_blank = False
+        out.append(line)
+    result = "\n".join(out)
+
+    # Hard truncate if still too large
+    if len(result) > max_chars:
+        result = result[:max_chars] + "\n\n... (model truncated -- upload fewer tables for full context)"
+
+    return result
+
+
+def build_system_prompt(ctx: UserContext, discovered_schema: str, allowed_charts: Optional[set] = None) -> str:
+    p = """You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## #1 RULE -- DATA ONLY, ZERO OUTSIDE KNOWLEDGE (READ THIS FIRST)
 - You are a DATA QUERY TOOL. You are NOT an analyst, consultant, or advisor.
 - Your ONLY job: run SQL queries and report the numbers. NOTHING ELSE.
 - EVERY sentence you write MUST come from a SQL query result. If it didn't come from a query, DO NOT WRITE IT.
 - NEVER add: background info, project descriptions, strategic significance, industry context, technology descriptions, geographical info, company capabilities, or ANY knowledge from your training data.
 - NEVER use phrases like: "This demonstrates...", "This showcases...", "This represents...", "This is significant because...", "This indicates...", "Key takeaways...", "In summary..."
-- NEVER describe what a project IS, what it DOES, what technology it USES, or WHY it matters — unless those exact words appear in a SQL query result.
-- If you catch yourself writing something that didn't come from a SQL result — DELETE IT before responding.
+- NEVER describe what a project IS, what it DOES, what technology it USES, or WHY it matters -- unless those exact words appear in a SQL query result.
+- If you catch yourself writing something that didn't come from a SQL result -- DELETE IT before responding.
 - VIOLATIONS: If your response contains ANY information not from a SQL result, it is WRONG and HARMFUL. The user makes business decisions from your answers. Outside knowledge pollutes the data.
 
 ## HOW IT WORKS
@@ -959,16 +775,19 @@ def build_system_prompt(discovered_schema: str, extra_ctx: str = "", allowed_cha
 4. Report the query results factually. Do not add interpretation or context beyond what the data shows.
 5. You can chain multiple queries (up to 5) if needed.
 
-## ABSOLUTE RULE — NEVER ASSUME, ALWAYS VERIFY
+## ABSOLUTE RULE -- ANSWER ONLY, HIDE YOUR WORK
+- NEVER show SQL queries, code blocks, or internal reasoning to the user. The user only wants the ANSWER.
+- NEVER say "Let me run a query", "I need to query", "Let me check", or describe your process. Just DO IT silently and present the results.
+- Your output should look like a polished report -- charts, tables, metric cards -- NOT a developer console.
+- The ```sql_exec blocks are for the SYSTEM to execute. They are YOUR internal tool. NEVER include them in your visible response text.
 - NEVER make assumptions about data values, filters, date ranges, or what the user means. If anything is ambiguous, ASK the user to clarify BEFORE running SQL.
 - NEVER estimate, guess, or fabricate numbers. Every number you report MUST come from an executed SQL query result.
-- If the user asks a question that could be interpreted multiple ways (e.g. "incidents on AP1000" — do they mean all time? This year? A specific incident type?), ASK which one they mean.
-- If a query returns unexpected results (zero rows, very high/low numbers), tell the user what you found and ask if the filters are correct — do NOT silently adjust or re-interpret.
-- ALWAYS show your reasoning: state what SQL you are running and why, so the user can verify your approach.
+- If the user asks a question that could be interpreted multiple ways, ASK which one they mean.
+- If a query returns unexpected results (zero rows, very high/low numbers), tell the user what you found and ask if the filters are correct.
 - When in doubt, run a simple exploratory query first (e.g. SELECT DISTINCT values) to understand the data before making aggregation queries.
 - Your answers will be used for real business decisions. Wrong numbers are worse than no numbers. If you are not confident in a result, say so.
 
-## CRITICAL RULES — TABLE SCOPE & CARDINALITY
+## CRITICAL RULES -- TABLE SCOPE & CARDINALITY
 - You may ONLY query tables that are explicitly defined in the SEMANTIC MODEL section below. If a table is not in the semantic model, DO NOT query it, reference it, or suggest it exists.
 - If the user asks about data that does not map to any table in the semantic model, tell them: "That data is not available in the current model. The tables I can query are: [list them]."
 - NEVER run SHOW TABLES, INFORMATION_SCHEMA, or any discovery queries. The semantic model is your single source of truth for what tables exist.
@@ -985,12 +804,15 @@ def build_system_prompt(discovered_schema: str, extra_ctx: str = "", allowed_cha
 - NEVER assume all tables are in the same catalog. Different tables may live in different catalogs and schemas. Using the wrong catalog will cause query failures."""
 
     # Build connections table for the prompt
-    if len(CONNECTIONS) > 1:
+    connections = ctx.connections
+    semantic_model = _slim_tmdl(ctx.semantic_model) if ctx.semantic_model else ""
+
+    if len(connections) > 1:
         p += "\n\n## AVAILABLE DATA CONNECTIONS\n"
         p += "You have access to multiple database connections. ALWAYS specify which connection to target.\n\n"
         p += "| ID | Name | Type | Default Catalog/Database | SQL Dialect |\n"
         p += "|---|---|---|---|---|\n"
-        for cid, c in CONNECTIONS.items():
+        for cid, c in connections.items():
             ctype = c.get("type", "databricks")
             if ctype == "databricks":
                 default_db = c.get("catalog_schema", "")
@@ -1010,46 +832,49 @@ SELECT ...
 - Databricks: backtick quoting, three-part names `catalog`.`schema`.`table`
 - SQL Server: square bracket quoting, [database].[schema].[table]
 """
-    elif len(CONNECTIONS) == 1:
-        c = next(iter(CONNECTIONS.values()))
+    elif len(connections) == 1:
+        c = next(iter(connections.values()))
         if c.get("type") == "databricks" and c.get("catalog_schema"):
             p += f"\n- Default catalog.schema: {c['catalog_schema']}"
         elif c.get("type") == "sqlserver" and c.get("database"):
             p += f"\n- Default database: {c['database']}"
 
     # Parse table source mappings from TMDL expressions
-    table_sources = parse_table_sources(SEMANTIC_MODEL) if SEMANTIC_MODEL else {}
+    table_sources = parse_table_sources(semantic_model) if semantic_model else {}
 
     # Semantic model goes FIRST so the AI reads relationships before schema/queries
-    if SEMANTIC_MODEL:
+    if semantic_model:
         p += f"""
 
-## SEMANTIC MODEL (from Power BI) — THIS IS YOUR ONLY SOURCE OF TRUTH
+## SEMANTIC MODEL (from Power BI) -- THIS IS YOUR ONLY SOURCE OF TRUTH
 These are the ONLY tables you are allowed to query. Do not query any table not listed here.
 Study every relationship, join key, and cardinality BEFORE writing any SQL.
 
 **How to read TMDL format:**
-- "fromColumn: TableA.ColX" → "toColumn: TableB.ColY" means TableA joins to TableB on those columns. Use ONLY these columns for JOINs.
+- "fromColumn: TableA.ColX" -> "toColumn: TableB.ColY" means TableA joins to TableB on those columns. Use ONLY these columns for JOINs.
 - Default relationship (no toCardinality) = many-to-one. The fromColumn side has many rows per value.
 - "toCardinality: many" = many-to-many. You MUST use GROUP BY / aggregation to avoid duplicated rows. Joining without aggregation WILL produce wrong numbers.
-- "crossFilteringBehavior: bothDirections" = bidirectional filter. Both sides can filter each other — be careful with aggregation direction.
-- DAX measures define the business logic in Power BI — replicate the equivalent logic in SQL when queried.
+- "crossFilteringBehavior: bothDirections" = bidirectional filter. Both sides can filter each other -- be careful with aggregation direction.
+- DAX measures define the business logic in Power BI -- replicate the equivalent logic in SQL when queried.
 - Column definitions show data types, annotations, and summarization rules.
-- Ignore LocalDateTable_* tables — these are auto-generated by Power BI for date hierarchies.
+- Ignore LocalDateTable_* tables -- these are auto-generated by Power BI for date hierarchies.
 
 ```
-{SEMANTIC_MODEL}
+{semantic_model}
 ```"""
 
     # Add table source mapping section so the AI knows which catalog.schema each table belongs to
     # Determine default catalog.schema from first Databricks connection
-    _db_conn = get_first_databricks_conn()
-    _default_cs = _db_conn.get("catalog_schema", "") if _db_conn else ""
+    _default_cs = ""
+    for _c in connections.values():
+        if _c.get("type") == "databricks" and _c.get("catalog_schema"):
+            _default_cs = _c["catalog_schema"]
+            break
 
     if table_sources:
         p += "\n\n## TABLE SOURCE MAPPING\n"
         p += "Each table below is mapped to its database source. ALWAYS use these fully-qualified names in SQL.\n\n"
-        if len(CONNECTIONS) > 1:
+        if len(connections) > 1:
             p += "| Table Name | Catalog | Schema | Source Table/View | Connection |\n"
             p += "|---|---|---|---|---|\n"
         else:
@@ -1062,9 +887,9 @@ Study every relationship, join key, and cardinality BEFORE writing any SQL.
             cat = info.get("catalog", default_cat)
             sch = info.get("schema", default_sch)
             src = info.get("source_table", tname)
-            if len(CONNECTIONS) > 1:
+            if len(connections) > 1:
                 # Try to match table host to a connection
-                conn_id = _match_table_to_connection(info)
+                conn_id = _match_table_to_connection(info, connections)
                 p += f"| {tname} | {cat} | {sch} | `{cat}.{sch}.{src}` | {conn_id} |\n"
             else:
                 p += f"| {tname} | {cat} | {sch} | `{cat}.{sch}.{src}` |\n"
@@ -1084,8 +909,31 @@ Study every relationship, join key, and cardinality BEFORE writing any SQL.
 - Write DAX measures and calculated columns for Power BI
 - Explain data model relationships and how tables join
 
+## PRESENTATION -- ALWAYS VISUAL-FIRST
+Your responses should look like a modern data dashboard, not a wall of text. Every answer should be visually rich and easy to scan.
+
+**Rules:**
+1. **ALWAYS include a chart** when query results have 2+ rows. Default to a chart -- only skip it for a single scalar number.
+2. **Use bold metric cards** for key numbers. Format: **Total Incidents** 1,247 | **Average/Month** 104 | **Peak** March (187). Place these ABOVE any chart or table.
+3. **Use markdown tables** for detailed breakdowns -- the frontend renders them as styled data tables. Always format tables with pipes and headers:
+| Column A | Column B | Column C |
+|---|---|---|
+| value 1 | value 2 | value 3 |
+4. **Combine formats**: lead with metric cards for the headline numbers, then a chart for the visual, then a table for row-level detail.
+5. **Use headings** (`###`) to organize multi-part answers into clear sections.
+6. **Format numbers** for readability: use commas for thousands (1,247), round percentages to 1 decimal (73.2%), and use currency symbols where appropriate.
+7. **Never output raw data dumps**. If a query returns rows, present them in a table or chart -- never as plain text lists.
+
+**Example response structure:**
+### Monthly Incidents
+**Total** 1,247 | **Average/Month** 104 | **Peak** March (187)
+
+```chart
+{"type": "bar", "title": "Incidents by Month", "labels": [...], "datasets": [...]}
+```
+
 ## CHART OUTPUT
-When your analysis produces data that would be clearer as a visual, include a chart by outputting a ```chart code block with JSON inside. The frontend will render it as an interactive chart.
+Include a chart by outputting a ```chart code block with JSON. The frontend renders it as an interactive Chart.js visual.
 
 **Supported chart types:** """ + ", ".join(sorted(allowed_charts or ALL_CHART_TYPES)) + """
 
@@ -1114,65 +962,123 @@ When your analysis produces data that would be clearer as a visual, include a ch
 }
 ```
 
-**When to include a chart:**
-- Aggregations with 3+ categories (use bar or horizontalBar)
-- Time series / trends (use line)
-- Proportions / distributions (use pie or doughnut)
-- Comparisons across groups (use bar)
-- Correlations between two numeric fields (use scatter — datasets use `data: [{x: val, y: val}, ...]`)
+**Chart type guide:**
+- Aggregations / comparisons across groups -> **bar** or **horizontalBar**
+- Time series / trends -> **line**
+- Proportions / parts of a whole -> **pie** or **doughnut**
+- Two numeric variables -> **scatter** (datasets use `data: [{x: val, y: val}, ...]`)
 
 **When NOT to chart:**
-- Single scalar values (just state the number)
-- Fewer than 3 data points (just describe them)
-- Raw row listings (use a text table instead)
-
-Always include a text summary alongside the chart — never output ONLY a chart with no explanation.
+- A single scalar value (use a bold metric card instead)
+- Raw row listings with no aggregation (use a markdown table)
 
 ## STYLE
-- Be concise. State the numbers and what query produced them. Nothing more.
-- Do NOT editorialize. Do NOT add adjectives like "remarkable", "excellent", "impressive", "strong".
-- Do NOT add sections like "Key Insights", "Strategic Significance", "What This Means", "Recommendations".
-- Format: show the SQL you ran, the result, and a plain factual summary of what the numbers say. Stop there."""
+- Be concise and visual. Lead with the numbers, support with charts.
+- Do NOT editorialize. No adjectives like "remarkable", "excellent", "impressive", "strong".
+- Do NOT add "Key Insights", "Strategic Significance", "What This Means", "Recommendations".
+- Every number must come from a SQL query result. Present the results visually -- never show the SQL itself."""
 
-    ctx = extra_ctx or EXTRA_CONTEXT
-    if ctx:
-        p += f"\n\n## ADDITIONAL CONTEXT\n{ctx}"
+    if ctx.extra_context:
+        p += f"\n\n## ADDITIONAL CONTEXT\n{ctx.extra_context}"
 
-    if not CONNECTIONS:
-        p += "\n\n## NOTE: No data connections configured. Help with general analytics, DAX, SQL concepts. Suggest adding connections via Settings for live data."
-    elif not SEMANTIC_MODEL:
+    if not connections and semantic_model:
+        p += """
+
+## NOTE: SCHEMA-ONLY MODE -- No database connections configured.
+You have the semantic model (table definitions, columns, relationships, measures) but CANNOT execute SQL queries.
+You CAN:
+- Explain the data model structure, tables, columns, and relationships
+- Suggest DAX measures and calculated columns
+- Write SQL queries the user could run (but you cannot execute them)
+- Analyze the schema to answer questions about what data is available
+- Help the user understand their data model
+You CANNOT: Execute queries or return actual data values. If the user asks for data, explain that they need to add a database connection via Settings for live queries.
+Do NOT generate sql_exec blocks -- they will fail without a connection."""
+    elif not connections:
+        p += "\n\n## NOTE: No data connections and no semantic model loaded. Help with general analytics, DAX, SQL concepts. Suggest adding a semantic model (.tmdl files) and connections via Settings."
+    elif not semantic_model:
         p += "\n\n## NOTE: No semantic model loaded. You CANNOT query any tables until .tmdl files are loaded. Tell the user to load their semantic model via Settings > Load TMDL Files before asking data questions."
 
     # Final reminder at the end of prompt (LLMs weight beginning and end most heavily)
     p += """
 
-## FINAL REMINDER — READ BEFORE EVERY RESPONSE
+## FINAL REMINDER -- READ BEFORE EVERY RESPONSE
 Before you send your response, review it sentence by sentence. Delete any sentence that did not come from a SQL query result. No exceptions. No "helpful context". No outside knowledge. Data only."""
 
     return p
 
 
-# ══════════════════════════════════════════════════════════
-# LLM API CALL (via OpenRouter)
-# ══════════════════════════════════════════════════════════
-async def call_llm(system: str, messages: list[dict]) -> str:
-    """Call OpenRouter API and return the text response."""
-    if not OPENROUTER_API_KEY:
-        raise HTTPException(status_code=500, detail="OpenRouter API key not configured.")
+def build_inline_system_prompt(ctx: UserContext, inline_data: str, inline_stats: str | None = None, allowed_charts: set | None = None) -> str:
+    """System prompt for inline data mode -- analyze CSV + pre-computed stats, no SQL."""
+    charts = ", ".join(sorted(allowed_charts or ALL_CHART_TYPES))
+    p = '''You are "PBIChat" -- an AI data analyst. The user provided a dataset from Power BI.
 
-    # OpenRouter uses OpenAI-compatible format: system message goes in messages array
-    or_messages = [{"role": "system", "content": system}] + messages
+## HOW TO USE THE DATA
+You have TWO data sources below:
+1. **SUMMARY STATISTICS** -- Pre-computed from ALL rows in the dataset. Use these for aggregate questions (totals, averages, counts, min/max). These are ALWAYS accurate.
+2. **RAW DATA (CSV)** -- The actual rows. May be truncated if the dataset is large. Use this for detail questions (finding specific records, top/bottom N, filtering, listing).
+
+**CRITICAL**: For any question about totals, sums, averages, counts, or min/max -- use the SUMMARY STATISTICS, not the CSV. The CSV may be a subset of the full data.
+
+## RULES
+- NEVER fabricate numbers. Every value must come from the stats or CSV.
+- If a question requires row-level detail and the CSV is truncated, tell the user you can only analyze the rows visible.
+- Do NOT generate SQL. Analyze the provided data directly.
+'''
+
+    if inline_stats:
+        p += f"\n## SUMMARY STATISTICS (computed from ALL rows)\n```json\n{inline_stats}\n```\n"
+
+    p += f"\n## RAW DATA (CSV)\n```csv\n{inline_data}\n```\n"
+
+    p += f"""
+## PRESENTATION -- VISUAL-FIRST
+1. ALWAYS include a chart when data has 2+ categories.
+2. Use **bold metric cards**: **Total** 1,247 | **Average** 104 | **Peak** March (187)
+3. Use markdown tables for detailed breakdowns.
+4. Format numbers: commas, 1-decimal percentages, currency symbols.
+5. Use ### headings to organize multi-part answers.
+
+## CHART OUTPUT
+Output a ```chart code block with JSON:
+```chart
+{{"type":"bar","title":"Title","labels":["A","B"],"datasets":[{{"label":"Series","data":[45,32]}}]}}
+```
+Supported types: {charts}
+- Comparisons: bar/horizontalBar | Trends: line | Proportions: pie/doughnut | Correlation: scatter
+"""
+    if ctx.extra_context:
+        p += f"\n## ADDITIONAL CONTEXT\n{ctx.extra_context}\n"
+    return p
+
+
+# ══════════════════════════════════════════════════════════
+# LLM API CALL (via Azure OpenAI -- Bechtel)
+# ══════════════════════════════════════════════════════════
+async def call_llm(system: str, messages: list[dict], ctx: UserContext = None) -> str:
+    """Call Azure OpenAI API and return the text response.
+    Uses ctx for per-user model overrides when provided."""
+    api_key = AZURE_OPENAI_API_KEY
+    endpoint = AZURE_OPENAI_ENDPOINT
+    model = ctx.effective_llm_model if ctx else LLM_MODEL
+
+    if not api_key or not endpoint:
+        raise HTTPException(status_code=500, detail="Azure OpenAI API key/endpoint not configured.")
+
+    # Azure OpenAI uses OpenAI-compatible chat format
+    api_messages = [{"role": "system", "content": system}] + messages
 
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
+            endpoint,
             json={
-                "model": LLM_MODEL,
+                "model": model,
                 "max_tokens": 4096,
-                "messages": or_messages,
+                "messages": api_messages,
+                "reasoning_effort": "none",
             },
             headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "api-key": api_key,
                 "Content-Type": "application/json",
             },
         )
@@ -1182,9 +1088,11 @@ async def call_llm(system: str, messages: list[dict]) -> str:
             err_msg = error.get("error", {}).get("message", "") if isinstance(error.get("error"), dict) else str(error.get("error", ""))
             # Scrub any sensitive data from error messages
             safe_msg = err_msg[:200] if err_msg else f"HTTP {resp.status_code}"
-            for secret in [OPENROUTER_API_KEY, SETTINGS_PASSWORD]:
-                if secret and secret in safe_msg:
-                    safe_msg = safe_msg.replace(secret, "***")
+            if api_key and api_key in safe_msg:
+                safe_msg = safe_msg.replace(api_key, "***")
+            # Log the prompt size for debugging context-window issues
+            total_chars = sum(len(m.get("content", "")) for m in api_messages)
+            logging.error(f"LLM API error ({resp.status_code}): {safe_msg} | model={model} prompt_chars={total_chars}")
             raise HTTPException(
                 status_code=502,
                 detail=f"LLM API error: {safe_msg}",
@@ -1197,35 +1105,49 @@ async def call_llm(system: str, messages: list[dict]) -> str:
 # ══════════════════════════════════════════════════════════
 # ENDPOINTS
 # ══════════════════════════════════════════════════════════
-@app.post("/verify-password")
-async def verify_password(request: Request, _auth=Depends(require_auth)):
-    """Verify the password is correct. Returns 200 if valid, 403 if not."""
-    _check_rate_limit(request.client.host)
-    return {"status": "ok"}
-
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
     return HealthResponse(
         status="ok",
-        databricks_connected=bool(CONNECTIONS),
-        llm_configured=bool(OPENROUTER_API_KEY),
+        databricks_connected=True,
+        llm_configured=bool(AZURE_OPENAI_API_KEY),
     )
 
 
 @app.get("/warehouse-status", response_model=WarehouseStatusResponse)
 async def warehouse_status(connection_id: str = None):
     """Check Databricks warehouse state (returns instantly, never hangs)."""
+    ctx = get_user_context()
+    user_conns = ctx.connections
+
+    if not user_conns:
+        return WarehouseStatusResponse(
+            state="RUNNING", name="", message="Backend is running.", ready=True,
+        )
+
     conn = None
-    if connection_id and connection_id in CONNECTIONS:
-        conn = CONNECTIONS[connection_id]
+    if connection_id and connection_id in user_conns:
+        conn = user_conns[connection_id]
+    elif not conn:
+        # Find first Databricks connection
+        for c in user_conns.values():
+            if c.get("type") == "databricks":
+                conn = c
+                break
+
+    if not conn:
+        return WarehouseStatusResponse(
+            state="RUNNING", name="", message="No Databricks connections configured.", ready=True,
+        )
+
     info = await get_warehouse_state(conn)
     state = info["state"]
 
     # If management API is blocked (FORBIDDEN), fall back to a direct SQL probe
     if state == "FORBIDDEN":
-        cid = connection_id or (next(iter(CONNECTIONS)) if CONNECTIONS else None)
-        result = await execute_sql("SELECT 1 AS test", connection_id=cid)
+        cid = connection_id or (next(iter(user_conns)) if user_conns else None)
+        result = await execute_sql("SELECT 1 AS test", connections=user_conns, connection_id=cid)
         if not result.startswith("ERROR"):
             return WarehouseStatusResponse(
                 state="RUNNING", name="", message="Connected and ready.", ready=True,
@@ -1240,26 +1162,40 @@ async def warehouse_status(connection_id: str = None):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, request: Request, _auth=Depends(require_auth), license: LicenseInfo = Depends(resolve_license_dep), authorization: Optional[str] = Header(None)):
-    """Main chat endpoint — runs the agentic loop (authenticated, rate-limited, license-enforced)."""
+async def chat(req: ChatRequest, request: Request):
+    """Main chat endpoint -- runs the agentic loop (rate-limited by IP)."""
     _check_rate_limit(request.client.host)
-    chat_user_id = get_current_user(authorization)
+    ctx = get_user_context()
 
-    # License enforcement: daily query limit
-    if license.daily_limit is not None and license.daily_used >= license.daily_limit:
-        return ChatResponse(
-            response=(
-                f"You've reached the free tier limit of {license.daily_limit} queries per day. "
-                "Upgrade to Pro for unlimited queries. Enter a license key in Settings."
-            ),
-            queries_executed=[],
-            tier=license.tier,
-            daily_used=license.daily_used,
-            daily_limit=license.daily_limit,
+    # -- INLINE DATA MODE --
+    if req.inline_data:
+        chat_ctx = ctx
+        if req.extra_context:
+            chat_ctx = UserContext(
+                user_id=ctx.user_id, extra_context=req.extra_context,
+                connections=ctx.connections,
+                llm_model=ctx.llm_model,
+                semantic_model=ctx.semantic_model,
+            )
+        system = build_inline_system_prompt(
+            chat_ctx, req.inline_data,
+            inline_stats=req.inline_stats,
+            allowed_charts=ALL_CHART_TYPES,
         )
+        logging.info(f"Inline data mode: {len(req.inline_data)} chars CSV, stats={'yes' if req.inline_stats else 'no'}, system_prompt={len(system)} chars")
+        messages = [{"role": m.role, "content": m.content} for m in req.history[-20:]]
+        messages.append({"role": "user", "content": req.message})
+        ai_text = await call_llm(system, messages, ctx=ctx)
+        return ChatResponse(response=ai_text, queries_executed=[])
+
+    # -- DATABASE MODE --
 
     # Pre-check: if any Databricks connection is configured, check warehouse state
-    db_conn = get_first_databricks_conn()
+    db_conn = None
+    for c in ctx.connections.values():
+        if c.get("type") == "databricks":
+            db_conn = c
+            break
     if db_conn:
         wh = await get_warehouse_state(db_conn)
         if wh["state"] in ("STOPPED", "STARTING", "STOPPING"):
@@ -1267,27 +1203,57 @@ async def chat(req: ChatRequest, request: Request, _auth=Depends(require_auth), 
                 response=(
                     f"The Databricks warehouse is currently **{wh['state'].lower()}**. "
                     f"{wh['message']}\n\n"
-                    "Please try again in a moment — the warehouse should be ready shortly."
+                    "Please try again in a moment -- the warehouse should be ready shortly."
                 ),
                 queries_executed=[],
-                tier=license.tier, daily_used=license.daily_used, daily_limit=license.daily_limit,
             )
         if wh["state"] not in ("RUNNING", "FORBIDDEN") and wh["state"] not in ("NOT_CONFIGURED",):
             return ChatResponse(
                 response=f"Databricks warehouse issue: {wh['message']}",
                 queries_executed=[],
-                tier=license.tier, daily_used=license.daily_used, daily_limit=license.daily_limit,
             )
 
-    # Discover schema if not cached
-    discovered = await discover_schema()
+    # Discover schema using connections and cache
+    discovered = await discover_schema(ctx)
 
-    # Build system prompt with tier-appropriate chart types
+    # Merge per-request extra_context from the chat request body (if provided)
+    chat_ctx = ctx
+    if req.extra_context:
+        chat_ctx = UserContext(
+            user_id=ctx.user_id,
+            extra_context=req.extra_context,
+            connections=ctx.connections,
+            llm_model=ctx.llm_model,
+            semantic_model=ctx.semantic_model,
+        )
+
+    # Build system prompt -- all chart types available
     system = build_system_prompt(
+        chat_ctx,
         discovered,
-        extra_ctx=req.extra_context,
-        allowed_charts=license.allowed_charts,
+        allowed_charts=ALL_CHART_TYPES,
     )
+
+    # -- SCHEMA-ONLY MODE: semantic model loaded but no connections --
+    if not ctx.connections and ctx.semantic_model:
+        logging.info(f"Schema-only mode: TMDL loaded ({len(ctx.semantic_model)} chars), no connections")
+        messages = [{"role": m.role, "content": m.content} for m in req.history[-20:]]
+        messages.append({"role": "user", "content": req.message})
+        ai_text = await call_llm(system, messages, ctx=ctx)
+        return ChatResponse(response=ai_text, queries_executed=[])
+
+    def _clean_ai_response(text: str) -> str:
+        """Strip all SQL artifacts from LLM response before returning to user."""
+        # 1. Strip fenced sql_exec / sql blocks
+        text = re.sub(r"```sql_exec.*?```", "", text, flags=re.DOTALL)
+        text = re.sub(r"```sql\b.*?```", "", text, flags=re.DOTALL)
+        # 2. Strip unfenced connection= lines followed by SQL
+        text = re.sub(r"^connection=\S+.*$", "", text, flags=re.MULTILINE)
+        # 3. Strip standalone SQL statements (SELECT...;) not inside prose
+        text = re.sub(r"^\s*(SELECT|INSERT|UPDATE|DELETE|WITH)\b[^;]*;\s*$", "", text, flags=re.MULTILINE | re.IGNORECASE)
+        # 4. Collapse excessive blank lines
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
 
     # Data-only reminder injected into every user message
     DATA_FENCE = "\n\n[REMINDER: Respond ONLY with data from SQL query results. Do NOT add outside knowledge, project descriptions, strategic significance, or any information not returned by a query. Every sentence must come from a SQL result.]"
@@ -1301,17 +1267,14 @@ async def chat(req: ChatRequest, request: Request, _auth=Depends(require_auth), 
 
     for _ in range(max_loops):
         # Call LLM
-        ai_text = await call_llm(system, messages)
+        ai_text = await call_llm(system, messages, ctx=ctx)
 
         # Extract sql_exec blocks (with optional connection= parameter)
         sql_blocks = re.findall(r"```sql_exec(?:\s+connection=(\S+))?\n(.*?)```", ai_text, re.DOTALL)
 
         if not sql_blocks:
-            # No SQL — final response; record usage
-            await asyncio.to_thread(record_usage, license.key, request.client.host, "chat", chat_user_id)
             return ChatResponse(
-                response=ai_text, queries_executed=queries_executed,
-                tier=license.tier, daily_used=license.daily_used + 1, daily_limit=license.daily_limit,
+                response=_clean_ai_response(ai_text), queries_executed=queries_executed,
             )
 
         # Execute each SQL query
@@ -1319,7 +1282,7 @@ async def chat(req: ChatRequest, request: Request, _auth=Depends(require_auth), 
         for i, (conn_id, sql) in enumerate(sql_blocks):
             sql = sql.strip()
             conn_id = conn_id.strip() if conn_id else None
-            result = await execute_sql(sql, connection_id=conn_id)
+            result = await execute_sql(sql, connections=ctx.connections, connection_id=conn_id)
             is_error = result.startswith("ERROR")
             queries_executed.append({"sql": sql, "result": result[:500], "error": is_error})
             results_text += f"\n\n### Query {i + 1}:\n```\n{sql}\n```\nResults:\n```\n{result}\n```"
@@ -1328,53 +1291,48 @@ async def chat(req: ChatRequest, request: Request, _auth=Depends(require_auth), 
         messages.append({"role": "assistant", "content": ai_text})
         messages.append({
             "role": "user",
-            "content": f"[SYSTEM: SQL query results]\n{results_text}\n\nReport these results factually. ONLY state what the numbers show — do NOT add background info, project descriptions, strategic significance, or any knowledge not in the query results above. If the data answers the question, present it and stop. Only output more sql_exec blocks if you need additional data.",
+            "content": f"[SYSTEM: SQL query results]\n{results_text}\n\nPresent these results as a polished visual answer -- use charts, bold metric cards, and markdown tables. NEVER show SQL, code blocks, or describe your process. NEVER add background info, project descriptions, or outside knowledge. If the data answers the question, present it and stop. If you need more data, output another sql_exec block.",
         })
 
-    # If we exhausted loops, return last AI response; record usage
-    await asyncio.to_thread(record_usage, license.key, request.client.host, "chat", chat_user_id)
+    # If we exhausted loops, return last AI response (strip SQL artifacts)
     return ChatResponse(
-        response=ai_text, queries_executed=queries_executed,
-        tier=license.tier, daily_used=license.daily_used + 1, daily_limit=license.daily_limit,
+        response=_clean_ai_response(ai_text), queries_executed=queries_executed,
     )
 
 
 @app.post("/config")
-async def update_config(req: ConfigUpdate, _auth=Depends(require_auth)):
-    """Update runtime configuration (authenticated). Does NOT handle connections."""
-    global OPENROUTER_API_KEY, LLM_MODEL, EXTRA_CONTEXT, _schema_cache
-
-    if req.openrouter_api_key is not None:
-        OPENROUTER_API_KEY = req.openrouter_api_key
+async def update_config(req: ConfigUpdate):
+    """Update configuration. Does NOT handle connections."""
+    config = _load_config()
     if req.llm_model is not None:
-        LLM_MODEL = req.llm_model
+        config["llm_model"] = req.llm_model
     if req.extra_context is not None:
-        EXTRA_CONTEXT = req.extra_context
-
-    _schema_cache = {}
-    save_env()
+        config["extra_context"] = req.extra_context
+    _save_config(config)
+    _invalidate_all_schema()
     return {"status": "updated"}
 
 
 @app.get("/config")
-async def get_config(_auth=Depends(require_auth)):
-    """Retrieve current configuration (authenticated)."""
+async def get_config():
+    """Retrieve current configuration."""
+    ctx = get_user_context()
     return {
-        "openrouter_api_key": OPENROUTER_API_KEY,
-        "llm_model": LLM_MODEL,
-        "semantic_model_loaded": bool(SEMANTIC_MODEL),
-        "semantic_model_chars": len(SEMANTIC_MODEL),
-        "extra_context": EXTRA_CONTEXT,
+        "llm_model": ctx.effective_llm_model,
+        "semantic_model_loaded": bool(ctx.semantic_model),
+        "semantic_model_chars": len(ctx.semantic_model),
+        "extra_context": ctx.extra_context,
     }
 
 
-# ── Connection CRUD endpoints ──
+# -- Connection CRUD endpoints --
 
 @app.get("/connections")
-async def list_connections(_auth=Depends(require_auth)):
+async def list_connections():
     """List all configured connections (secrets redacted)."""
+    ctx = get_user_context()
     result = []
-    for c in CONNECTIONS.values():
+    for c in ctx.connections.values():
         d = dict(c)
         # Redact secrets for GET
         if d.get("token"):
@@ -1386,22 +1344,18 @@ async def list_connections(_auth=Depends(require_auth)):
 
 
 @app.post("/connections")
-async def save_all_connections_endpoint(req: dict, _auth=Depends(require_auth), license: LicenseInfo = Depends(resolve_license_dep)):
-    """Replace all connections (authenticated, license-enforced).
-    Detects redacted secrets and preserves originals."""
-    global CONNECTIONS, _schema_cache
+async def save_all_connections_endpoint(req: dict):
+    """Replace all connections. Detects redacted secrets and preserves originals."""
+    config = _load_config()
+    old_conns_list = config.get("connections", [])
+    old_conns = {}
+    for c in old_conns_list:
+        cid = c.get("id")
+        if cid:
+            old_conns[cid] = c
 
-    old_conns = dict(CONNECTIONS)  # snapshot before overwriting
     new_conns = req.get("connections", [])
-
-    # License enforcement: connection limit
-    if license.max_connections is not None and len(new_conns) > license.max_connections:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Free tier allows {license.max_connections} connection(s). "
-                   f"You have {len(new_conns)}. Enter a Pro license key for unlimited connections."
-        )
-    CONNECTIONS = {}
+    updated: list[dict] = []
     for c in new_conns:
         cid = c.get("id") or _slugify(c.get("name", "conn"))
         c["id"] = cid
@@ -1416,19 +1370,21 @@ async def save_all_connections_endpoint(req: dict, _auth=Depends(require_auth), 
             c["token"] = old["token"]
         if c.get("password") == "***" and old.get("password"):
             c["password"] = old["password"]
-        CONNECTIONS[cid] = c
+        updated.append(c)
 
-    _schema_cache = {}
-    save_connections()
-    return {"status": "updated", "count": len(CONNECTIONS)}
+    config["connections"] = updated
+    _save_config(config)
+    _invalidate_all_schema()
+    return {"status": "updated", "count": len(updated)}
 
 
 @app.post("/test-connection/{connection_id}")
-async def test_single_connection(connection_id: str, _auth=Depends(require_auth)):
-    """Test a specific connection (authenticated)."""
-    if connection_id not in CONNECTIONS:
+async def test_single_connection(connection_id: str):
+    """Test a specific connection."""
+    ctx = get_user_context()
+    if connection_id not in ctx.connections:
         raise HTTPException(status_code=404, detail=f"Connection '{connection_id}' not found.")
-    conn = CONNECTIONS[connection_id]
+    conn = ctx.connections[connection_id]
 
     if conn.get("type") == "databricks":
         result = await _execute_databricks_sql("SELECT 1 AS test", conn)
@@ -1443,10 +1399,8 @@ async def test_single_connection(connection_id: str, _auth=Depends(require_auth)
 
 
 @app.post("/upload-tmdl")
-async def upload_tmdl(req: TmdlUploadRequest, _auth=Depends(require_auth)):
-    """Accept uploaded .tmdl file contents and set as semantic model (authenticated)."""
-    global SEMANTIC_MODEL, _schema_cache
-
+async def upload_tmdl(req: TmdlUploadRequest):
+    """Accept uploaded .tmdl file contents and save as semantic model."""
     if not req.files:
         raise HTTPException(status_code=400, detail="No files provided.")
 
@@ -1455,6 +1409,7 @@ async def upload_tmdl(req: TmdlUploadRequest, _auth=Depends(require_auth)):
     filtered = [
         f for f in req.files
         if not f.name.startswith("cultures/")
+        and not _CULTURE_FILE_RE.match(Path(f.name).name)
         and not any(Path(f.name).stem.startswith(p) for p in _skip_prefixes)
     ]
 
@@ -1462,23 +1417,43 @@ async def upload_tmdl(req: TmdlUploadRequest, _auth=Depends(require_auth)):
     for f in sorted(filtered, key=lambda x: x.name):
         parts.append(f"=== {f.name} ===\n{f.content}")
 
-    SEMANTIC_MODEL = "\n\n".join(parts)
-    _schema_cache = {}
-    save_env()
+    model_content = "\n\n".join(parts)
+
+    # Save to local file
+    _save_semantic_model(model_content)
+
+    # If connections were provided with the upload, save them to config too
+    if req.connections is not None:
+        config = _load_config()
+        config["connections"] = req.connections
+        _save_config(config)
+
+    _invalidate_all_schema()
 
     return {
         "status": "loaded",
         "files_loaded": len(filtered),
         "files_skipped": len(req.files) - len(filtered),
         "files": [f.name for f in sorted(filtered, key=lambda x: x.name)],
-        "total_chars": len(SEMANTIC_MODEL),
+        "total_chars": len(model_content),
     }
 
 
 @app.post("/test-connection")
 async def test_connection():
-    """Test the first Databricks connection — fast check, no hanging."""
-    conn = get_first_databricks_conn()
+    """Test the first Databricks connection -- fast check, no hanging."""
+    ctx = get_user_context()
+    user_conns = ctx.connections
+
+    if not user_conns:
+        return {"status": "connected", "state": "RUNNING", "message": "Backend is running."}
+
+    # Find first Databricks connection
+    conn = None
+    for c in user_conns.values():
+        if c.get("type") == "databricks":
+            conn = c
+            break
     if not conn:
         raise HTTPException(status_code=400, detail="No Databricks connections configured.")
 
@@ -1492,550 +1467,9 @@ async def test_connection():
     if state in ("STOPPED", "STOPPING", "STARTING"):
         return {"status": "starting", "state": state, "message": info["message"]}
 
-    # For RUNNING, FORBIDDEN, ERROR, TIMEOUT, or UNKNOWN — try SQL directly
+    # For RUNNING, FORBIDDEN, ERROR, TIMEOUT, or UNKNOWN -- try SQL directly
     if state in ("RUNNING", "FORBIDDEN", "ERROR", "TIMEOUT") or state not in _STATE_MESSAGES:
-        result = await execute_sql("SELECT 1 AS test", connection_id=conn["id"])
+        result = await execute_sql("SELECT 1 AS test", connections=user_conns, connection_id=conn["id"])
         if result.startswith("ERROR"):
             raise HTTPException(status_code=500, detail=result)
         return {"status": "connected", "state": "RUNNING", "message": "Connected and ready."}
-
-
-# ══════════════════════════════════════════════════════════
-# AUTH ENDPOINTS (Supabase Auth)
-# ══════════════════════════════════════════════════════════
-class AuthSignupRequest(BaseModel):
-    email: str
-    password: str
-    display_name: str = ""
-
-class AuthLoginRequest(BaseModel):
-    email: str
-    password: str
-
-class AuthRefreshRequest(BaseModel):
-    refresh_token: str
-
-
-@app.post("/auth/signup")
-async def auth_signup(req: AuthSignupRequest):
-    """Sign up a new user via Supabase Auth, create user row + license key."""
-    if not _sb_users_ready:
-        raise HTTPException(status_code=503, detail="User management tables not configured.")
-    sb = _get_sb()
-    try:
-        auth_resp = sb.auth.sign_up({"email": req.email, "password": req.password})
-    except Exception as e:
-        msg = str(e)
-        if "already registered" in msg.lower() or "already been registered" in msg.lower():
-            raise HTTPException(status_code=409, detail="An account with this email already exists.")
-        raise HTTPException(status_code=400, detail=msg[:200])
-
-    user = auth_resp.user
-    if not user:
-        raise HTTPException(status_code=400, detail="Signup failed — no user returned.")
-
-    license_key = f"pbi-{uuid.uuid4()}"
-    try:
-        sb.table("users").insert({
-            "id": user.id,
-            "email": req.email,
-            "display_name": req.display_name or req.email.split("@")[0],
-            "tier": "free",
-            "license_key": license_key,
-        }).execute()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"User row creation failed: {str(e)[:200]}")
-
-    session = auth_resp.session
-    return {
-        "user_id": user.id,
-        "email": req.email,
-        "display_name": req.display_name or req.email.split("@")[0],
-        "tier": "free",
-        "license_key": license_key,
-        "access_token": session.access_token if session else None,
-        "refresh_token": session.refresh_token if session else None,
-    }
-
-
-@app.post("/auth/login")
-async def auth_login(req: AuthLoginRequest):
-    """Log in via Supabase Auth, return JWT + user profile."""
-    if not _sb_users_ready:
-        raise HTTPException(status_code=503, detail="User management tables not configured.")
-    sb = _get_sb()
-    try:
-        auth_resp = sb.auth.sign_in_with_password({"email": req.email, "password": req.password})
-    except Exception as e:
-        msg = str(e)
-        if "invalid" in msg.lower() or "credentials" in msg.lower():
-            raise HTTPException(status_code=401, detail="Invalid email or password.")
-        raise HTTPException(status_code=400, detail=msg[:200])
-
-    user = auth_resp.user
-    session = auth_resp.session
-    if not user or not session:
-        raise HTTPException(status_code=401, detail="Login failed.")
-
-    # Fetch user profile from users table
-    try:
-        profile_resp = sb.table("users").select("tier, license_key, display_name").eq("id", user.id).execute()
-        if profile_resp.data:
-            profile = profile_resp.data[0]
-        else:
-            # User exists in auth but not in users table — create row
-            license_key = f"pbi-{uuid.uuid4()}"
-            sb.table("users").insert({
-                "id": user.id,
-                "email": req.email,
-                "display_name": req.email.split("@")[0],
-                "tier": "free",
-                "license_key": license_key,
-            }).execute()
-            profile = {"tier": "free", "license_key": license_key, "display_name": req.email.split("@")[0]}
-    except Exception:
-        profile = {"tier": "free", "license_key": "", "display_name": ""}
-
-    return {
-        "user_id": user.id,
-        "email": req.email,
-        "tier": profile["tier"],
-        "license_key": profile["license_key"],
-        "display_name": profile.get("display_name", ""),
-        "access_token": session.access_token,
-        "refresh_token": session.refresh_token,
-    }
-
-
-@app.post("/auth/refresh")
-async def auth_refresh(req: AuthRefreshRequest):
-    """Refresh the session using a refresh token."""
-    sb = _get_sb()
-    try:
-        auth_resp = sb.auth.refresh_session(req.refresh_token)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-
-    session = auth_resp.session
-    if not session:
-        raise HTTPException(status_code=401, detail="Session refresh failed.")
-
-    return {
-        "access_token": session.access_token,
-        "refresh_token": session.refresh_token,
-    }
-
-
-@app.get("/auth/me")
-async def auth_me(user_id: str = Depends(require_user)):
-    """Get current user profile + subscription status."""
-    if not _sb_users_ready:
-        raise HTTPException(status_code=503, detail="User management tables not configured.")
-    sb = _get_sb()
-
-    # Fetch user profile
-    resp = sb.table("users").select("*").eq("id", user_id).execute()
-    if not resp.data:
-        raise HTTPException(status_code=404, detail="User not found.")
-    user = resp.data[0]
-
-    # Fetch active subscription
-    sub_data = None
-    try:
-        sub_resp = sb.table("subscriptions") \
-            .select("stripe_subscription_id, status, current_period_end, cancel_at_period_end") \
-            .eq("user_id", user_id) \
-            .in_("status", ["active", "trialing", "past_due"]) \
-            .limit(1) \
-            .execute()
-        if sub_resp.data:
-            sub_data = sub_resp.data[0]
-    except Exception:
-        pass
-
-    return {
-        "user_id": user["id"],
-        "email": user["email"],
-        "display_name": user["display_name"],
-        "tier": user["tier"],
-        "license_key": user["license_key"],
-        "subscription": sub_data,
-        "created_at": user["created_at"],
-    }
-
-
-# ══════════════════════════════════════════════════════════
-# STRIPE BILLING ENDPOINTS
-# ══════════════════════════════════════════════════════════
-@app.post("/billing/create-checkout-session")
-async def billing_create_checkout(request: Request, user_id: str = Depends(require_user)):
-    """Create a Stripe Checkout session for Pro subscription."""
-    if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID:
-        raise HTTPException(status_code=503, detail="Stripe is not configured.")
-    if not _sb_users_ready:
-        raise HTTPException(status_code=503, detail="User management tables not configured.")
-
-    sb = _get_sb()
-    resp = sb.table("users").select("email, stripe_customer_id, tier").eq("id", user_id).execute()
-    if not resp.data:
-        raise HTTPException(status_code=404, detail="User not found.")
-    user = resp.data[0]
-
-    if user["tier"] == "pro":
-        raise HTTPException(status_code=400, detail="You are already on the Pro plan.")
-
-    # Get or create Stripe customer
-    customer_id = user.get("stripe_customer_id")
-    if not customer_id:
-        customer = stripe.Customer.create(
-            email=user["email"],
-            metadata={"user_id": user_id},
-        )
-        customer_id = customer.id
-        sb.table("users").update({"stripe_customer_id": customer_id}).eq("id", user_id).execute()
-
-    # Build success/cancel URLs (use Referer or Origin if available)
-    origin = request.headers.get("origin", request.headers.get("referer", ""))
-    if origin:
-        origin = origin.rstrip("/")
-    success_url = f"{origin}/?checkout=success" if origin else "https://pbichat.com/checkout-success"
-    cancel_url = f"{origin}/?checkout=cancel" if origin else "https://pbichat.com/checkout-cancel"
-
-    session = stripe.checkout.Session.create(
-        customer=customer_id,
-        mode="subscription",
-        line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata={"user_id": user_id},
-    )
-
-    return {"checkout_url": session.url, "session_id": session.id}
-
-
-@app.post("/billing/webhook")
-async def billing_webhook(request: Request):
-    """Handle Stripe webhook events."""
-    if not STRIPE_WEBHOOK_SECRET:
-        raise HTTPException(status_code=503, detail="Webhook secret not configured.")
-
-    body = await request.body()
-    sig = request.headers.get("stripe-signature")
-    if not sig:
-        raise HTTPException(status_code=400, detail="Missing Stripe signature.")
-
-    try:
-        event = stripe.Webhook.construct_event(body, sig, STRIPE_WEBHOOK_SECRET)
-    except stripe.SignatureVerificationError:
-        raise HTTPException(status_code=400, detail="Invalid webhook signature.")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Webhook error: {str(e)[:200]}")
-
-    sb = _get_sb()
-    event_type = event["type"]
-    data = event["data"]["object"]
-
-    try:
-        if event_type == "checkout.session.completed":
-            await _handle_checkout_completed(sb, data)
-        elif event_type == "invoice.paid":
-            await _handle_invoice_paid(sb, data)
-        elif event_type == "invoice.payment_failed":
-            await _handle_invoice_failed(sb, data)
-        elif event_type == "customer.subscription.updated":
-            await _handle_subscription_updated(sb, data)
-        elif event_type == "customer.subscription.deleted":
-            await _handle_subscription_deleted(sb, data)
-    except Exception as e:
-        print(f"PBICHAT: Webhook handler error ({event_type}): {str(e)[:300]}")
-
-    return JSONResponse({"status": "ok"})
-
-
-async def _handle_checkout_completed(sb: SupabaseClient, session: dict):
-    """checkout.session.completed — create subscription record, upgrade to pro."""
-    user_id = session.get("metadata", {}).get("user_id")
-    customer_id = session.get("customer")
-    subscription_id = session.get("subscription")
-    if not user_id or not subscription_id:
-        return
-
-    # Fetch subscription details from Stripe
-    sub = stripe.Subscription.retrieve(subscription_id)
-
-    def _db():
-        # Create subscription record
-        sb.table("subscriptions").upsert({
-            "user_id": user_id,
-            "stripe_subscription_id": subscription_id,
-            "stripe_price_id": sub["items"]["data"][0]["price"]["id"] if sub["items"]["data"] else STRIPE_PRICE_ID,
-            "status": sub["status"],
-            "current_period_start": datetime.fromtimestamp(sub["current_period_start"], tz=timezone.utc).isoformat(),
-            "current_period_end": datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc).isoformat(),
-            "cancel_at_period_end": sub.get("cancel_at_period_end", False),
-        }, on_conflict="stripe_subscription_id").execute()
-
-        # Upgrade user to pro
-        update_data = {"tier": "pro", "updated_at": datetime.now(timezone.utc).isoformat()}
-        if customer_id:
-            update_data["stripe_customer_id"] = customer_id
-        sb.table("users").update(update_data).eq("id", user_id).execute()
-
-    await asyncio.to_thread(_db)
-    print(f"PBICHAT: User {user_id} upgraded to pro via checkout.")
-
-
-async def _handle_invoice_paid(sb: SupabaseClient, invoice: dict):
-    """invoice.paid — record payment, ensure pro tier."""
-    customer_id = invoice.get("customer")
-    subscription_id = invoice.get("subscription")
-    if not customer_id:
-        return
-
-    def _db():
-        # Find user by stripe_customer_id
-        user_resp = sb.table("users").select("id").eq("stripe_customer_id", customer_id).execute()
-        if not user_resp.data:
-            return
-        user_id = user_resp.data[0]["id"]
-
-        # Record payment
-        sb.table("payments").upsert({
-            "user_id": user_id,
-            "stripe_payment_id": invoice.get("payment_intent") or invoice["id"],
-            "stripe_subscription_id": subscription_id,
-            "amount_cents": invoice.get("amount_paid", 0),
-            "currency": invoice.get("currency", "usd"),
-            "status": invoice.get("status", "paid"),
-        }, on_conflict="stripe_payment_id").execute()
-
-        # Ensure pro tier
-        sb.table("users").update({
-            "tier": "pro",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", user_id).execute()
-
-    await asyncio.to_thread(_db)
-
-
-async def _handle_invoice_failed(sb: SupabaseClient, invoice: dict):
-    """invoice.payment_failed — downgrade to free."""
-    customer_id = invoice.get("customer")
-    if not customer_id:
-        return
-
-    def _db():
-        user_resp = sb.table("users").select("id").eq("stripe_customer_id", customer_id).execute()
-        if not user_resp.data:
-            return
-        user_id = user_resp.data[0]["id"]
-        sb.table("users").update({
-            "tier": "free",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", user_id).execute()
-
-    await asyncio.to_thread(_db)
-    print(f"PBICHAT: Payment failed for customer {customer_id}, downgraded to free.")
-
-
-async def _handle_subscription_updated(sb: SupabaseClient, sub: dict):
-    """customer.subscription.updated — sync status."""
-    subscription_id = sub.get("id")
-    if not subscription_id:
-        return
-
-    def _db():
-        update = {
-            "status": sub["status"],
-            "cancel_at_period_end": sub.get("cancel_at_period_end", False),
-            "current_period_start": datetime.fromtimestamp(sub["current_period_start"], tz=timezone.utc).isoformat(),
-            "current_period_end": datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if sub.get("canceled_at"):
-            update["canceled_at"] = datetime.fromtimestamp(sub["canceled_at"], tz=timezone.utc).isoformat()
-
-        sb.table("subscriptions").update(update).eq("stripe_subscription_id", subscription_id).execute()
-
-        # If subscription is no longer active, downgrade
-        if sub["status"] not in ("active", "trialing"):
-            sub_resp = sb.table("subscriptions").select("user_id").eq("stripe_subscription_id", subscription_id).execute()
-            if sub_resp.data:
-                sb.table("users").update({
-                    "tier": "free",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }).eq("id", sub_resp.data[0]["user_id"]).execute()
-
-    await asyncio.to_thread(_db)
-
-
-async def _handle_subscription_deleted(sb: SupabaseClient, sub: dict):
-    """customer.subscription.deleted — cancel + downgrade."""
-    subscription_id = sub.get("id")
-    if not subscription_id:
-        return
-
-    def _db():
-        now = datetime.now(timezone.utc).isoformat()
-        sb.table("subscriptions").update({
-            "status": "canceled",
-            "canceled_at": now,
-            "updated_at": now,
-        }).eq("stripe_subscription_id", subscription_id).execute()
-
-        sub_resp = sb.table("subscriptions").select("user_id").eq("stripe_subscription_id", subscription_id).execute()
-        if sub_resp.data:
-            sb.table("users").update({
-                "tier": "free",
-                "updated_at": now,
-            }).eq("id", sub_resp.data[0]["user_id"]).execute()
-
-    await asyncio.to_thread(_db)
-    print(f"PBICHAT: Subscription {subscription_id} deleted, user downgraded.")
-
-
-@app.post("/billing/cancel-subscription")
-async def billing_cancel(user_id: str = Depends(require_user)):
-    """Cancel the user's subscription at period end."""
-    if not STRIPE_SECRET_KEY:
-        raise HTTPException(status_code=503, detail="Stripe is not configured.")
-    if not _sb_users_ready:
-        raise HTTPException(status_code=503, detail="User management tables not configured.")
-
-    sb = _get_sb()
-    sub_resp = sb.table("subscriptions") \
-        .select("stripe_subscription_id, status") \
-        .eq("user_id", user_id) \
-        .in_("status", ["active", "trialing", "past_due"]) \
-        .limit(1) \
-        .execute()
-
-    if not sub_resp.data:
-        raise HTTPException(status_code=404, detail="No active subscription found.")
-
-    subscription_id = sub_resp.data[0]["stripe_subscription_id"]
-
-    try:
-        stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to cancel: {str(e)[:200]}")
-
-    sb.table("subscriptions").update({
-        "cancel_at_period_end": True,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }).eq("stripe_subscription_id", subscription_id).execute()
-
-    return {"status": "canceled", "cancel_at_period_end": True}
-
-
-# ══════════════════════════════════════════════════════════
-# LICENSE STATUS (public — no auth required)
-# ══════════════════════════════════════════════════════════
-class LicenseStatusResponse(BaseModel):
-    tier: str
-    daily_used: int
-    daily_limit: Optional[int]
-    max_connections: Optional[int]
-    allowed_charts: list[str]
-
-@app.get("/license", response_model=LicenseStatusResponse)
-async def get_license_status(license: LicenseInfo = Depends(resolve_license_dep)):
-    """Check license tier and usage. No auth required — visual calls this on load."""
-    return LicenseStatusResponse(
-        tier=license.tier,
-        daily_used=license.daily_used,
-        daily_limit=license.daily_limit,
-        max_connections=license.max_connections,
-        allowed_charts=sorted(license.allowed_charts),
-    )
-
-
-# ══════════════════════════════════════════════════════════
-# LICENSE ADMIN ENDPOINTS (authenticated)
-# ══════════════════════════════════════════════════════════
-class LicenseCreateRequest(BaseModel):
-    label: str = ""
-    tier: str = "pro"
-    expires_at: Optional[str] = None  # ISO8601 or null
-    max_connections: Optional[int] = None
-
-class LicenseCreateResponse(BaseModel):
-    key: str
-    tier: str
-    label: str
-    created_at: str
-    expires_at: Optional[str]
-
-@app.post("/admin/licenses", response_model=LicenseCreateResponse)
-async def create_license(req: LicenseCreateRequest, _auth=Depends(require_auth)):
-    """Create a new license key (admin only)."""
-    key = f"pbi-{uuid.uuid4()}"
-    now = datetime.now(timezone.utc).isoformat()
-
-    def _insert():
-        sb = _get_sb()
-        sb.table("licenses").insert({
-            "key": key,
-            "tier": req.tier,
-            "label": req.label,
-            "created_at": now,
-            "expires_at": req.expires_at,
-            "max_connections": req.max_connections,
-        }).execute()
-
-    await asyncio.to_thread(_insert)
-    return LicenseCreateResponse(
-        key=key, tier=req.tier, label=req.label,
-        created_at=now, expires_at=req.expires_at,
-    )
-
-@app.get("/admin/licenses")
-async def list_licenses(_auth=Depends(require_auth)):
-    """List all license keys (admin only)."""
-    def _query():
-        sb = _get_sb()
-        resp = sb.table("licenses") \
-            .select("key, tier, label, created_at, expires_at, is_active, max_connections") \
-            .order("created_at", desc=True) \
-            .execute()
-        return resp.data
-
-    return {"licenses": await asyncio.to_thread(_query)}
-
-@app.delete("/admin/licenses/{license_key}")
-async def revoke_license(license_key: str, _auth=Depends(require_auth)):
-    """Revoke (deactivate) a license key (admin only)."""
-    def _revoke():
-        sb = _get_sb()
-        resp = sb.table("licenses") \
-            .update({"is_active": False}) \
-            .eq("key", license_key) \
-            .execute()
-        if not resp.data:
-            raise HTTPException(status_code=404, detail="License key not found.")
-
-    await asyncio.to_thread(_revoke)
-    return {"status": "revoked", "key": license_key}
-
-@app.get("/admin/usage")
-async def get_usage_stats(days: int = 7, _auth=Depends(require_auth)):
-    """Get usage stats for the last N days (admin only)."""
-    def _query():
-        sb = _get_sb()
-        cutoff = (date.today() - timedelta(days=days)).isoformat()
-        resp = sb.table("usage_log") \
-            .select("license_key, created_at") \
-            .gte("created_at", cutoff) \
-            .execute()
-        # Aggregate by license_key + day in Python (PostgREST doesn't support GROUP BY)
-        from collections import Counter
-        counts: Counter = Counter()
-        for row in resp.data:
-            day = row["created_at"][:10]
-            counts[(row.get("license_key"), day)] += 1
-        return [
-            {"license_key": k, "day": d, "queries": c}
-            for (k, d), c in sorted(counts.items(), key=lambda x: x[0][1], reverse=True)
-        ]
-
-    return {"usage": await asyncio.to_thread(_query)}

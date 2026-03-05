@@ -1,7 +1,7 @@
 # Data Processing Agreement (DPA)
 
 **Effective Date:** February 14, 2026
-**Last Updated:** February 14, 2026
+**Last Updated:** March 2, 2026
 **Entity:** PBIChat ("Processor")
 **Contact:** support@pbichat.com
 **Website:** https://pbichat.com
@@ -49,12 +49,10 @@ For the duration of the service agreement, plus any retention periods specified 
 ### 4.3 Nature and Purpose
 - Receiving and processing natural-language chat messages
 - Generating and executing SQL queries against Controller's databases
-- Authenticating users and managing accounts
 - Processing payments for Pro subscriptions
 - Tracking usage for tier enforcement
 
 ### 4.4 Types of Personal Data
-- Email addresses
 - IP addresses
 - Chat messages (may contain personal data depending on Controller's database content)
 - SQL queries and query results (may contain personal data)
@@ -74,7 +72,7 @@ The Processor shall:
 
 3. **Security measures** — Implement appropriate technical and organizational measures to ensure a level of security appropriate to the risk, including:
    - Encryption of data in transit (HTTPS/TLS)
-   - Authentication via JWT tokens
+   - Password-protected settings access
    - Rate limiting and abuse prevention
    - SQL injection prevention (blocking destructive queries)
    - Credential and API key scrubbing in error messages
@@ -100,10 +98,7 @@ The Controller hereby provides general written authorization for the following s
 
 | Sub-processor | Purpose | Data Processed | Location |
 |---------------|---------|---------------|----------|
-| **Supabase Inc.** | Authentication, database storage | Email, hashed passwords, license keys, usage logs | United States (AWS) |
-| **OpenRouter Inc.** | LLM API routing | Chat messages, database schema context | United States |
-| **Anthropic PBC** (via OpenRouter) | AI language model processing | Chat messages, schema context | United States |
-| **Stripe Inc.** | Payment processing | Email, subscription data, payment metadata | United States |
+| **Microsoft Corporation** | Azure OpenAI (LLM), Payment processing (via AppSource) | Chat messages, database schema context, subscription status, licensing data | United States |
 
 ### 6.2 Changes to Sub-processors
 We will notify the Controller at least **30 days** before adding or replacing a sub-processor. The Controller may object to a new sub-processor within 14 days of notification. If the objection is not resolved, the Controller may terminate the agreement.

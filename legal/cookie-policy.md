@@ -1,7 +1,7 @@
 # Cookie Policy
 
 **Effective Date:** February 14, 2026
-**Last Updated:** February 14, 2026
+**Last Updated:** March 2, 2026
 **Entity:** PBIChat
 **Contact:** support@pbichat.com
 **Website:** https://pbichat.com
@@ -20,14 +20,13 @@ PBIChat uses browser **localStorage** — not cookies — to store:
 
 | Key | Purpose | Data Stored |
 |-----|---------|-------------|
-| JWT session token | Keeps you logged in | Encrypted authentication token |
 | Chat history | Preserves recent conversations | Last 20 chat messages |
 
 localStorage data:
 - Is stored only in your browser
 - Is not sent to our servers with every request (unlike cookies)
 - Is not shared with third parties
-- Is cleared when you log out or clear your browser data
+- Is cleared when you clear your browser data
 - Does not track you across websites
 
 ### 2.2 No Tracking Cookies
@@ -40,18 +39,13 @@ PBIChat does **not** use:
 
 ## 3. Third-Party Cookies
 
-### 3.1 Stripe Checkout
+### 3.1 Microsoft AppSource
 
-When you upgrade to the Pro tier, you are redirected to **Stripe Checkout** (a Stripe-hosted payment page). Stripe may set its own cookies on the `checkout.stripe.com` domain for:
-- Fraud prevention
-- Payment session management
-- Security
-
-These cookies are set by Stripe, not by PBIChat, and are governed by [Stripe's Cookie Policy](https://stripe.com/cookies-policy/legal). PBIChat has no access to or control over Stripe's cookies.
+Billing and subscriptions are handled by Microsoft through AppSource and the Power BI Licensing API. Microsoft may set its own cookies when you interact with AppSource or Power BI Service. These cookies are governed by [Microsoft's Privacy Statement](https://privacy.microsoft.com/privacystatement) and are not controlled by PBIChat.
 
 ### 3.2 No Other Third-Party Cookies
 
-No other third-party services used by PBIChat (Supabase, OpenRouter) set cookies in your browser through the PBIChat visual or API.
+No other third-party services used by PBIChat (Azure OpenAI) set cookies in your browser through the PBIChat visual or API.
 
 ## 4. Power BI Context
 
@@ -60,10 +54,8 @@ The PBIChat visual runs inside Microsoft Power BI (Desktop or Service). Power BI
 ## 5. Managing Your Data
 
 Since PBIChat uses localStorage rather than cookies:
-- **To clear PBIChat data:** Log out via the visual's Settings panel, or clear your browser's localStorage
-- **To clear Stripe cookies:** Use your browser's cookie management settings for the `stripe.com` domain
-
-No cookie consent banner is required for PBIChat because we do not set cookies. The Stripe Checkout page handles its own cookie consent where required.
+- **To clear PBIChat data:** Clear your browser's localStorage
+No cookie consent banner is required for PBIChat because we do not set cookies.
 
 ## 6. Changes to This Policy
 

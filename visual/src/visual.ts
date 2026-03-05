@@ -16,47 +16,19 @@ interface HistoryMsg {
     content: string;
 }
 
-class ConnectionCard extends formattingSettings.SimpleCard {
-    name = "connection";
-    displayName = "Connection";
-    backendUrl = new formattingSettings.TextInput({
-        name: "backendUrl",
-        displayName: "Backend API URL",
-        description: "URL of your deployed PBIChat backend API",
-        placeholder: "https://your-app.azurewebsites.net",
-        value: "",
-    });
-    licenseKey = new formattingSettings.TextInput({
-        name: "licenseKey",
-        displayName: "License Key",
-        description: "Pro license key (optional — leave blank for free tier)",
-        placeholder: "pbi-...",
-        value: "",
-    });
-    slices: formattingSettings.Slice[] = [this.backendUrl, this.licenseKey];
-}
-
 class PBIChatFormattingSettings extends formattingSettings.Model {
-    connection = new ConnectionCard();
-    cards: formattingSettings.SimpleCard[] = [this.connection];
+    cards: formattingSettings.SimpleCard[] = [];
 }
 
 export class PBIChat implements IVisual {
     private host: IVisualHost;
     private container: HTMLElement;
-    private _backendUrl: string = "http://localhost:8000";
+    private _backendUrl: string = "https://bechtel.gnosi.io";
     private history: HistoryMsg[] = [];
-    private authPassword: string = "";  // password for backend auth
     private fmtSettings = new PBIChatFormattingSettings();
     private fmtService: FormattingSettingsService;
 
     private get backendUrl(): string { return this._backendUrl; }
-    private set backendUrl(val: string) {
-        let url = (val || "").trim().replace(/\/+$/, "");
-        // eslint-disable-next-line powerbi-visuals/no-http-string
-        if (url && !/^https?:\/\//i.test(url)) url = "http://" + url;
-        this._backendUrl = url;
-    }
     private busy: boolean = false;
     private isDarkTheme: boolean = true;
     private extraContext: string = "";
@@ -71,23 +43,17 @@ export class PBIChat implements IVisual {
     // Warehouse status tracking
     private warehouseState: string = "";
     private statusPollTimer: number | null = null;
-    private lastBackendUrl: string = "";
 
-    // License state
-    private licenseKey: string = "";
-    private licenseTier: string = "free";
-    private dailyUsed: number = 0;
-    private dailyLimit: number | null = 5;
-    private allowedCharts: string[] = ["bar", "line", "pie"];
+    // All available chart types
+    private readonly ALL_CHARTS: string[] = ["bar", "line", "pie", "doughnut", "scatter", "horizontalBar"];
 
-    // Auth state
-    private accessToken: string = "";
-    private refreshToken: string = "";
-    private userId: string = "";
-    private userEmail: string = "";
-    private userDisplayName: string = "";
-    private isLoggedIn: boolean = false;
-    private upgradePollTimer: number | null = null;
+    // Inline data mode (columns dropped into field well)
+    private inlineDataCsv: string = "";
+    private inlineStats: string = "";  // JSON summary stats from ALL rows
+    private inlineColumnCount: number = 0;
+    private inlineRowCount: number = 0;
+    private inlineRowsSent: number = 0; // rows actually included in CSV (may be < total)
+    private inlineTruncated: boolean = false;
 
     // DOM references
     private chatEl: HTMLElement;
@@ -96,53 +62,32 @@ export class PBIChat implements IVisual {
     private sendBtn: HTMLButtonElement;
     private welcomeEl: HTMLElement;
 
-    /** Fetch wrapper that adds auth, license, and JWT headers. Auto-refreshes on 401. */
-    private async authFetch(url: string, init: RequestInit = {}): Promise<Response> {
-        const makeHeaders = () => {
-            const headers = new Headers(init.headers || {});
-            if (this.authPassword) headers.set("X-Auth-Password", this.authPassword);
-            if (this.licenseKey) headers.set("X-License-Key", this.licenseKey);
-            if (this.accessToken) headers.set("Authorization", `Bearer ${this.accessToken}`);
-            return headers;
-        };
-        const resp = await fetch(url, { ...init, headers: makeHeaders() });
-        // Auto-refresh JWT on 401 and retry once
-        if (resp.status === 401 && this.refreshToken) {
-            const refreshed = await this.refreshSession();
-            if (refreshed) {
-                return fetch(url, { ...init, headers: makeHeaders() });
-            }
-        }
-        return resp;
-    }
-
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
         this.fmtService = new FormattingSettingsService();
         this.container = options.element;
         this.container.innerHTML = "";
         this.buildUI();
-        this.restoreSession();
+        this.wakeAndVerify();
     }
 
-    // ══════════════════════════════════════
+    // ======================================
     // BUILD THE CHAT UI
-    // ══════════════════════════════════════
+    // ======================================
     private buildUI(): void {
         this.container.innerHTML = `
         <div class="dia-root">
             <div class="dia-chat" id="dia-chat">
                 <div class="dia-msgs" id="dia-msgs">
                     <div class="dia-welcome" id="dia-welcome">
-                        <h1>PBIChat</h1>
                         <p class="dia-welcome-sub">AI-powered data assistant with live SQL access</p>
                         <div class="dia-setup-banner" id="dia-setup-banner">
                             <div class="dia-setup-title">Get Started</div>
                             <div class="dia-setup-steps">
-                                <div class="dia-setup-step"><span class="dia-step-num">1</span> Click <strong>Settings</strong> below and enter the admin password</div>
-                                <div class="dia-setup-step"><span class="dia-step-num">2</span> Set your <strong>Backend API URL</strong> and <strong>API key</strong></div>
-                                <div class="dia-setup-step"><span class="dia-step-num">3</span> Add a <strong>database connection</strong> (Databricks or SQL Server)</div>
-                                <div class="dia-setup-step"><span class="dia-step-num">4</span> Upload your <strong>.tmdl files</strong> and click Apply</div>
+                                <div class="dia-setup-step"><span class="dia-step-num">1</span> Click <strong>Settings</strong> and enter the password</div>
+                                <div class="dia-setup-step"><span class="dia-step-num">2</span> Add a <strong>database connection</strong> (Databricks or SQL Server)</div>
+                                <div class="dia-setup-step"><span class="dia-step-num">3</span> Select your <strong>semantic model folder</strong> (.tmdl files)</div>
+                                <div class="dia-setup-step"><span class="dia-step-num">4</span> Click <strong>Apply &amp; Close</strong> to save</div>
                             </div>
                         </div>
                         <div class="dia-sugs">
@@ -167,7 +112,6 @@ export class PBIChat implements IVisual {
                     <div class="dia-bottom-bar">
                         <button class="dia-bottom-btn" id="dia-settings-btn"><span class="dia-dot" id="dia-conn-dot"></span> Settings</button>
                         <button class="dia-bottom-btn" id="dia-clear-btn">Clear chat</button>
-                        <span class="dia-tier-badge dia-tier-free" id="dia-tier-badge">FREE</span>
                         <button class="dia-bottom-btn" id="dia-theme-btn">
                             <svg class="dia-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
@@ -185,20 +129,6 @@ export class PBIChat implements IVisual {
                 </div>
             </div>
 
-            <!-- Password gate -->
-            <div class="dia-pw-overlay" id="dia-pw-overlay">
-                <div class="dia-pw-box">
-                    <h3>Settings Locked</h3>
-                    <p>Enter the admin password to access settings.</p>
-                    <input type="password" id="dia-pw-input" placeholder="Password"/>
-                    <div class="dia-pw-error" id="dia-pw-error"></div>
-                    <div class="dia-pw-btns">
-                        <button class="dia-pw-cancel" id="dia-pw-cancel">Cancel</button>
-                        <button class="dia-pw-ok" id="dia-pw-ok">Unlock</button>
-                    </div>
-                </div>
-            </div>
-
             <!-- Settings flyout -->
             <div class="dia-settings-overlay" id="dia-settings-overlay"></div>
             <div class="dia-settings" id="dia-settings">
@@ -207,23 +137,13 @@ export class PBIChat implements IVisual {
                     <button class="dia-settings-close" id="dia-settings-close">&#x2715;</button>
                 </div>
                 <div class="dia-settings-body">
-                    <div id="dia-account-section"></div>
-                    <div class="dia-settings-section">Connection</div>
+                    <div class="dia-settings-section">Backend Server</div>
                     <div class="dia-field">
-                        <label>Backend API URL</label>
-                        <input type="text" id="dia-s-url" value="http://localhost:8000" placeholder="http://localhost:8000"/>
-                        <div class="dia-hint">URL of your PBIChat backend server.</div>
-                        <div id="dia-https-warn" class="dia-https-warn" style="display:none">Warning: Using HTTP instead of HTTPS. Data will be sent unencrypted. Use HTTPS in production.</div>
-                    </div>
-
-                    <div class="dia-settings-section">OpenRouter API</div>
-                    <div class="dia-field">
-                        <label>API Key</label>
-                        <input type="password" id="dia-s-apikey" placeholder="sk-or-v1-..."/>
-                    </div>
-                    <div class="dia-field">
-                        <label>Model</label>
-                        <input type="text" id="dia-s-model" placeholder="anthropic/claude-sonnet-4"/>
+                        <label>Backend URL</label>
+                        <select id="dia-backend-url-select" class="dia-select">
+                            <option value="https://bechtel.gnosi.io">Production (bechtel.gnosi.io)</option>
+                            <option value="http://localhost:8000">Local (localhost:8000)</option>
+                        </select>
                     </div>
 
                     <div class="dia-settings-section">Data Connections</div>
@@ -232,13 +152,12 @@ export class PBIChat implements IVisual {
 
                     <div class="dia-settings-section">Semantic Model (.tmdl Files)</div>
                     <div class="dia-tmdl-actions">
-                        <button class="dia-test-btn" id="dia-add-tmdl-btn">Add .tmdl Files</button>
-                        <button class="dia-test-btn dia-btn-muted" id="dia-tmdl-clear-btn" style="display:none">Clear All</button>
-                        <input type="file" id="dia-tmdl-file-input" multiple accept=".tmdl" style="display:none"/>
+                        <button class="dia-test-btn" id="dia-add-tmdl-btn">Select Folder</button>
+                        <button class="dia-test-btn dia-btn-muted" id="dia-tmdl-clear-btn" style="display:none">Clear</button>
+                        <input type="file" id="dia-tmdl-file-input" webkitdirectory style="display:none"/>
                     </div>
-                    <div class="dia-hint">Select .tmdl files from one or more folders. You can click "Add" multiple times to combine files from different locations.</div>
+                    <div class="dia-hint">Select the semantic model folder. All .tmdl files inside it (including subfolders) will be imported automatically.</div>
                     <div class="dia-tmdl-file-list" id="dia-tmdl-file-list" style="display:none"></div>
-                    <button class="dia-test-btn dia-btn-primary" id="dia-tmdl-upload-btn" style="display:none">Upload to Backend</button>
                     <div class="dia-test-result" id="dia-tmdl-result"></div>
 
                     <div class="dia-settings-section">Additional Context</div>
@@ -247,26 +166,122 @@ export class PBIChat implements IVisual {
                         <textarea id="dia-s-extra" rows="3" placeholder="e.g. OSHA rates use 200,000 multiplier."></textarea>
                     </div>
 
-                    <div class="dia-settings-section">License</div>
-                    <div class="dia-field">
-                        <label>License Key (optional)</label>
-                        <input type="text" id="dia-s-license" placeholder="pbi-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
-                        <div class="dia-hint">Enter a Pro license key for unlimited queries and all chart types. Leave blank for free tier (5 queries/day).</div>
-                    </div>
-
-                    <div class="dia-settings-section">License Management (Admin)</div>
-                    <div class="dia-field">
-                        <label>Create New License Key</label>
-                        <div style="display:flex;gap:6px;">
-                            <input type="text" id="dia-lic-label" placeholder="Label (e.g. Acme Corp)" style="flex:1"/>
-                            <button class="dia-test-btn dia-btn-primary" id="dia-lic-create-btn">Generate Key</button>
-                        </div>
-                        <div class="dia-test-result" id="dia-lic-result"></div>
-                    </div>
-                    <div id="dia-lic-list"></div>
-
                     <div class="dia-tmdl-warning" id="dia-tmdl-warning">Upload TMDL files before applying settings.</div>
                     <button class="dia-apply-btn" id="dia-apply-btn" disabled>Apply &amp; Close</button>
+                </div>
+            </div>
+
+            <!-- Confirm dialog -->
+            <div class="dia-confirm-overlay" id="dia-confirm-overlay"></div>
+            <div class="dia-confirm-dialog" id="dia-confirm-dialog">
+                <div class="dia-confirm-msg" id="dia-confirm-msg"></div>
+                <div class="dia-confirm-btns">
+                    <button class="dia-test-btn" id="dia-confirm-cancel">Cancel</button>
+                    <button class="dia-test-btn dia-btn-danger" id="dia-confirm-ok">Delete</button>
+                </div>
+            </div>
+
+            <!-- Help modal -->
+            <div class="dia-help-overlay" id="dia-help-overlay"></div>
+            <div class="dia-help-modal" id="dia-help-modal">
+                <div class="dia-help-header">
+                    <h3>Getting Started with PBIChat</h3>
+                    <button class="dia-settings-close" id="dia-help-close">&#x2715;</button>
+                </div>
+                <div class="dia-help-body">
+                    <div class="dia-help-section">
+                        <strong class="dia-help-subtitle">Two Ways to Use PBIChat</strong>
+                        <p style="margin:6px 0 12px;opacity:0.8">PBIChat works in two modes. Choose whichever fits your needs — or use both in the same report.</p>
+                    </div>
+
+                    <div class="dia-help-section">
+                        <strong class="dia-help-subtitle">Mode 1: Inline Data (Quick Start — No Setup)</strong>
+                        <p style="margin:4px 0 8px;opacity:0.7">Drag columns from your Power BI data model and start chatting instantly.</p>
+                        <div class="dia-help-step">
+                            <span class="dia-help-num">1</span>
+                            <div>
+                                <strong>Drag Columns</strong>
+                                <p>In the <strong>Build</strong> pane (Visualizations), drag any columns or measures into the <strong>Columns</strong> field well — just like you would with a Table visual.</p>
+                            </div>
+                        </div>
+                        <div class="dia-help-step">
+                            <span class="dia-help-num">2</span>
+                            <div>
+                                <strong>Ask Questions</strong>
+                                <p>The status bar will show your data size (e.g. "5 cols \u00d7 2,000 rows"). Start asking questions — the AI analyzes your data directly and responds with charts, tables, and insights.</p>
+                            </div>
+                        </div>
+                        <div class="dia-help-step">
+                            <span class="dia-help-num">\u2139</span>
+                            <div>
+                                <strong>How It Works</strong>
+                                <p>PBIChat reads all the rows Power BI provides, computes accurate summary statistics (totals, averages, min/max) from the <em>full</em> dataset, and sends the data to the AI. Even with large datasets, aggregate answers (totals, counts, averages) are always accurate.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dia-help-divider"></div>
+
+                    <div class="dia-help-section">
+                        <strong class="dia-help-subtitle">Mode 2: Database Connection (Full Power)</strong>
+                        <p style="margin:4px 0 8px;opacity:0.7">Connect directly to your database for live SQL queries across your entire data warehouse.</p>
+                        <div class="dia-help-step">
+                            <span class="dia-help-num">1</span>
+                            <div>
+                                <strong>Open Settings</strong>
+                                <p>Click <strong>Settings</strong> and enter the password to access configuration.</p>
+                            </div>
+                        </div>
+                        <div class="dia-help-step">
+                            <span class="dia-help-num">2</span>
+                            <div>
+                                <strong>Add a Data Connection</strong>
+                                <p>In Settings, click <strong>+ Add Connection</strong>. Choose your database type:</p>
+                                <ul>
+                                    <li><strong>Databricks</strong> — Workspace host URL, SQL warehouse HTTP path, access token, and catalog.schema</li>
+                                    <li><strong>SQL Server</strong> — Host, database name, username, and password</li>
+                                </ul>
+                                <p>Click <strong>Test</strong> to verify the connection works.</p>
+                            </div>
+                        </div>
+                        <div class="dia-help-step">
+                            <span class="dia-help-num">3</span>
+                            <div>
+                                <strong>Upload Your Semantic Model</strong>
+                                <p>Your semantic model tells PBIChat about your tables, columns, and relationships.</p>
+                                <ul>
+                                    <li>In Power BI Desktop, right-click your model and choose <strong>Edit TMDL</strong></li>
+                                    <li>In Settings, click <strong>Select Folder</strong> to import your <code>.tmdl</code> files</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dia-help-step">
+                            <span class="dia-help-num">4</span>
+                            <div>
+                                <strong>Ask Questions</strong>
+                                <p>Click <strong>Apply &amp; Close</strong>, then ask questions in natural language. PBIChat queries your database live and returns results with charts, tables, and metric cards.</p>
+                            </div>
+                        </div>
+                        <div class="dia-help-step">
+                            <span class="dia-help-num">\u2139</span>
+                            <div>
+                                <strong>How It Works</strong>
+                                <p>The AI reads your semantic model to understand table relationships, generates SQL queries, executes them against your database, and presents the results visually. It can chain multiple queries to answer complex questions. You never see the SQL — only the polished answer.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dia-help-divider"></div>
+                    <div class="dia-help-section">
+                        <strong class="dia-help-subtitle">Tips</strong>
+                        <ul class="dia-help-tips">
+                            <li>Be specific: "Total incidents in Q1 2024" is better than "Show me incidents"</li>
+                            <li>PBIChat only uses your data — it never guesses or makes up numbers</li>
+                            <li><strong>Inline mode</strong> takes priority: if columns are in the field well, PBIChat uses them. Remove columns to switch back to database mode</li>
+                            <li>Use <strong>Additional Context</strong> in Settings to add business rules (e.g. "Fiscal year starts in April")</li>
+                            <li>Each Power BI report can have its own model and database connections</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -305,40 +320,35 @@ export class PBIChat implements IVisual {
 
         // Theme toggle
         this.container.querySelector("#dia-theme-btn")!.addEventListener("click", () => this.toggleTheme());
-        // Help button
+        // Help modal
         this.container.querySelector("#dia-help-btn")!.addEventListener("click", () => {
-            this.host.launchUrl("https://pbichat.com/support");
+            this.container.querySelector("#dia-help-overlay")!.classList.add("dia-show");
+            this.container.querySelector("#dia-help-modal")!.classList.add("dia-show");
         });
-
-        // Password gate
-        this.container.querySelector("#dia-pw-ok")!.addEventListener("click", () => this.checkPassword());
-        this.container.querySelector("#dia-pw-cancel")!.addEventListener("click", () => this.closePwGate());
-        (this.container.querySelector("#dia-pw-input") as HTMLInputElement).addEventListener("keydown", (e: KeyboardEvent) => {
-            if (e.key === "Enter") this.checkPassword();
-        });
+        const closeHelp = () => {
+            this.container.querySelector("#dia-help-overlay")!.classList.remove("dia-show");
+            this.container.querySelector("#dia-help-modal")!.classList.remove("dia-show");
+        };
+        this.container.querySelector("#dia-help-close")!.addEventListener("click", closeHelp);
+        this.container.querySelector("#dia-help-overlay")!.addEventListener("click", closeHelp);
 
         // Settings panel
         this.container.querySelector("#dia-settings-close")!.addEventListener("click", () => this.closeSettings());
         this.container.querySelector("#dia-settings-overlay")!.addEventListener("click", () => this.closeSettings());
-        (this.container.querySelector("#dia-s-url") as HTMLInputElement).addEventListener("input", () => this.checkHttpsWarning());
+        (this.container.querySelector("#dia-backend-url-select") as HTMLSelectElement).addEventListener("change", (e) => {
+            this._backendUrl = (e.target as HTMLSelectElement).value;
+        });
         this.container.querySelector("#dia-add-conn-btn")!.addEventListener("click", () => this.addConnection());
         this.container.querySelector("#dia-add-tmdl-btn")!.addEventListener("click", () => {
             (this.container.querySelector("#dia-tmdl-file-input") as HTMLInputElement).click();
         });
         (this.container.querySelector("#dia-tmdl-file-input") as HTMLInputElement).addEventListener("change", (e) => this.addTmdlFiles(e));
         this.container.querySelector("#dia-tmdl-clear-btn")!.addEventListener("click", () => this.clearTmdlFiles());
-        this.container.querySelector("#dia-tmdl-upload-btn")!.addEventListener("click", () => this.uploadTmdlFiles());
         this.container.querySelector("#dia-apply-btn")!.addEventListener("click", () => this.applySettings());
-        this.container.querySelector("#dia-lic-create-btn")!.addEventListener("click", () => this.createLicense());
 
-        // Global keyboard handler — Escape closes overlays
+        // Global keyboard handler -- Escape closes overlays
         this.container.addEventListener("keydown", (e: KeyboardEvent) => {
             if (e.key === "Escape") {
-                const pwOverlay = this.container.querySelector("#dia-pw-overlay");
-                if (pwOverlay?.classList.contains("show")) {
-                    this.closePwGate();
-                    return;
-                }
                 const settingsPanel = this.container.querySelector("#dia-settings");
                 if (settingsPanel?.classList.contains("show")) {
                     this.closeSettings();
@@ -347,464 +357,75 @@ export class PBIChat implements IVisual {
         });
     }
 
-    // ══════════════════════════════════════
-    // AUTH SESSION MANAGEMENT
-    // ══════════════════════════════════════
-    private setAuthState(data: {
-        access_token?: string; refresh_token?: string;
-        user_id?: string; email?: string; display_name?: string;
-        tier?: string; license_key?: string;
-    }): void {
-        if (data.access_token) this.accessToken = data.access_token;
-        if (data.refresh_token) this.refreshToken = data.refresh_token;
-        if (data.user_id) this.userId = data.user_id;
-        if (data.email) this.userEmail = data.email;
-        if (data.display_name !== undefined) this.userDisplayName = data.display_name;
-        if (data.tier) this.licenseTier = data.tier;
-        if (data.license_key) this.licenseKey = data.license_key;
-        this.isLoggedIn = !!this.accessToken;
-        this.persistSession();
-        this.renderTierBadge();
-    }
-
-    private persistSession(): void {
-        try {
-            const session = {
-                accessToken: this.accessToken,
-                refreshToken: this.refreshToken,
-                userId: this.userId,
-                userEmail: this.userEmail,
-                userDisplayName: this.userDisplayName,
-                licenseTier: this.licenseTier,
-                licenseKey: this.licenseKey,
-            };
-            localStorage.setItem("pbichat_session", JSON.stringify(session));
-        } catch (_) { /* localStorage not available */ }
-    }
-
-    private restoreSession(): void {
-        try {
-            const raw = localStorage.getItem("pbichat_session");
-            if (!raw) return;
-            const s = JSON.parse(raw);
-            this.accessToken = s.accessToken || "";
-            this.refreshToken = s.refreshToken || "";
-            this.userId = s.userId || "";
-            this.userEmail = s.userEmail || "";
-            this.userDisplayName = s.userDisplayName || "";
-            this.licenseTier = s.licenseTier || "free";
-            this.licenseKey = s.licenseKey || "";
-            this.isLoggedIn = !!this.accessToken;
-            this.renderTierBadge();
-        } catch (_) { /* localStorage not available or corrupt */ }
-    }
-
-    private logout(): void {
-        this.accessToken = "";
-        this.refreshToken = "";
-        this.userId = "";
-        this.userEmail = "";
-        this.userDisplayName = "";
-        this.isLoggedIn = false;
-        this.licenseTier = "free";
-        this.licenseKey = "";
-        try { localStorage.removeItem("pbichat_session"); } catch (_) { /* ok */ }
-        this.renderTierBadge();
-        this.renderAccountSection();
-    }
-
-    private async refreshSession(): Promise<boolean> {
-        if (!this.refreshToken || !this.backendUrl) return false;
-        try {
-            const resp = await fetch(`${this.backendUrl}/auth/refresh`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ refresh_token: this.refreshToken }),
-            });
-            if (!resp.ok) return false;
-            const data = await resp.json();
-            this.accessToken = data.access_token;
-            this.refreshToken = data.refresh_token;
-            this.isLoggedIn = true;
-            this.persistSession();
-            return true;
-        } catch (_) { return false; }
-    }
-
-    // ══════════════════════════════════════
-    // AUTH OVERLAY (Login / Signup)
-    // ══════════════════════════════════════
-    private showAuthOverlay(): void {
-        let overlay = this.container.querySelector("#dia-auth-overlay") as HTMLElement;
-        if (!overlay) {
-            overlay = document.createElement("div");
-            overlay.className = "dia-auth-overlay";
-            overlay.id = "dia-auth-overlay";
-            overlay.innerHTML = `
-                <div class="dia-auth-box">
-                    <h3>Welcome to PBIChat</h3>
-                    <div class="dia-auth-tabs">
-                        <button class="dia-auth-tab active" data-tab="login">Log In</button>
-                        <button class="dia-auth-tab" data-tab="signup">Sign Up</button>
-                    </div>
-                    <div class="dia-auth-form" id="dia-auth-login">
-                        <div class="dia-field">
-                            <label>Email</label>
-                            <input type="email" id="dia-login-email" placeholder="you@example.com"/>
-                        </div>
-                        <div class="dia-field">
-                            <label>Password</label>
-                            <input type="password" id="dia-login-pw" placeholder="Password"/>
-                        </div>
-                        <div class="dia-auth-error" id="dia-login-error"></div>
-                        <button class="dia-apply-btn dia-auth-submit" id="dia-login-btn">Log In</button>
-                    </div>
-                    <div class="dia-auth-form" id="dia-auth-signup" style="display:none">
-                        <div class="dia-field">
-                            <label>Email</label>
-                            <input type="email" id="dia-signup-email" placeholder="you@example.com"/>
-                        </div>
-                        <div class="dia-field">
-                            <label>Display Name</label>
-                            <input type="text" id="dia-signup-name" placeholder="Your name (optional)"/>
-                        </div>
-                        <div class="dia-field">
-                            <label>Password</label>
-                            <input type="password" id="dia-signup-pw" placeholder="Min 6 characters"/>
-                        </div>
-                        <div class="dia-auth-error" id="dia-signup-error"></div>
-                        <button class="dia-apply-btn dia-auth-submit" id="dia-signup-btn">Create Account</button>
-                    </div>
-                    <button class="dia-auth-skip" id="dia-auth-skip">Continue without account</button>
-                </div>`;
-            this.container.querySelector(".dia-root")!.appendChild(overlay);
-
-            // Tab switching
-            overlay.querySelectorAll(".dia-auth-tab").forEach(tab => {
-                tab.addEventListener("click", () => {
-                    overlay.querySelectorAll(".dia-auth-tab").forEach(t => t.classList.remove("active"));
-                    tab.classList.add("active");
-                    const target = (tab as HTMLElement).dataset.tab;
-                    (overlay.querySelector("#dia-auth-login") as HTMLElement).style.display = target === "login" ? "" : "none";
-                    (overlay.querySelector("#dia-auth-signup") as HTMLElement).style.display = target === "signup" ? "" : "none";
-                });
-            });
-
-            // Login submit
-            overlay.querySelector("#dia-login-btn")!.addEventListener("click", () => this.handleLogin());
-            (overlay.querySelector("#dia-login-pw") as HTMLInputElement).addEventListener("keydown", (e: KeyboardEvent) => {
-                if (e.key === "Enter") this.handleLogin();
-            });
-
-            // Signup submit
-            overlay.querySelector("#dia-signup-btn")!.addEventListener("click", () => this.handleSignup());
-            (overlay.querySelector("#dia-signup-pw") as HTMLInputElement).addEventListener("keydown", (e: KeyboardEvent) => {
-                if (e.key === "Enter") this.handleSignup();
-            });
-
-            // Skip button
-            overlay.querySelector("#dia-auth-skip")!.addEventListener("click", () => {
-                this.hideAuthOverlay();
-            });
-        }
-        overlay.style.display = "flex";
-        setTimeout(() => (overlay.querySelector("#dia-login-email") as HTMLInputElement)?.focus(), 100);
-    }
-
-    private hideAuthOverlay(): void {
-        const overlay = this.container.querySelector("#dia-auth-overlay") as HTMLElement;
-        if (overlay) overlay.style.display = "none";
-    }
-
-    private async handleLogin(): Promise<void> {
-        const email = (this.container.querySelector("#dia-login-email") as HTMLInputElement).value.trim();
-        const pw = (this.container.querySelector("#dia-login-pw") as HTMLInputElement).value;
-        const errEl = this.container.querySelector("#dia-login-error") as HTMLElement;
-        if (!email || !pw) { errEl.textContent = "Please fill in all fields."; return; }
-        if (!this.backendUrl) { errEl.textContent = "Backend URL not configured."; return; }
-
-        errEl.textContent = "Logging in...";
-        try {
-            const resp = await fetch(`${this.backendUrl}/auth/login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, password: pw }),
-            });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                errEl.textContent = err.detail || "Login failed.";
-                return;
-            }
-            const data = await resp.json();
-            this.setAuthState({
-                access_token: data.access_token,
-                refresh_token: data.refresh_token,
-                user_id: data.user_id,
-                email: data.email,
-                display_name: data.display_name,
-                tier: data.tier,
-                license_key: data.license_key,
-            });
-            this.hideAuthOverlay();
-            this.fetchLicenseStatus();
-        } catch (e: any) {
-            errEl.textContent = "Cannot reach server.";
-        }
-    }
-
-    private async handleSignup(): Promise<void> {
-        const email = (this.container.querySelector("#dia-signup-email") as HTMLInputElement).value.trim();
-        const name = (this.container.querySelector("#dia-signup-name") as HTMLInputElement).value.trim();
-        const pw = (this.container.querySelector("#dia-signup-pw") as HTMLInputElement).value;
-        const errEl = this.container.querySelector("#dia-signup-error") as HTMLElement;
-        if (!email || !pw) { errEl.textContent = "Email and password are required."; return; }
-        if (pw.length < 6) { errEl.textContent = "Password must be at least 6 characters."; return; }
-        if (!this.backendUrl) { errEl.textContent = "Backend URL not configured."; return; }
-
-        errEl.textContent = "Creating account...";
-        try {
-            const resp = await fetch(`${this.backendUrl}/auth/signup`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, password: pw, display_name: name }),
-            });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                errEl.textContent = err.detail || "Signup failed.";
-                return;
-            }
-            const data = await resp.json();
-            if (data.access_token) {
-                this.setAuthState({
-                    access_token: data.access_token,
-                    refresh_token: data.refresh_token,
-                    user_id: data.user_id,
-                    email: data.email,
-                    tier: data.tier,
-                    license_key: data.license_key,
-                });
-                this.hideAuthOverlay();
-            } else {
-                // Email confirmation required
-                errEl.textContent = "";
-                const successEl = document.createElement("div");
-                successEl.className = "dia-test-result ok";
-                successEl.style.display = "block";
-                successEl.textContent = "Account created! Check your email to confirm, then log in.";
-                errEl.parentElement?.insertBefore(successEl, errEl);
-                // Switch to login tab
-                setTimeout(() => {
-                    (this.container.querySelector('.dia-auth-tab[data-tab="login"]') as HTMLElement)?.click();
-                }, 2000);
-            }
-        } catch (e: any) {
-            errEl.textContent = "Cannot reach server.";
-        }
-    }
-
-    // ══════════════════════════════════════
-    // STRIPE UPGRADE FLOW
-    // ══════════════════════════════════════
-    private async initiateUpgrade(): Promise<void> {
-        if (!this.backendUrl || !this.accessToken) {
-            this.showAuthOverlay();
-            return;
-        }
-        try {
-            const resp = await this.authFetch(`${this.backendUrl}/billing/create-checkout-session`, {
-                method: "POST",
-            });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                if (resp.status === 401) {
-                    this.showAuthOverlay();
-                    return;
-                }
-                this.showError(err.detail || "Could not start upgrade.");
-                return;
-            }
-            const data = await resp.json();
-            if (data.checkout_url) {
-                this.host.launchUrl(data.checkout_url);
-                this.startUpgradeCheck();
-            }
-        } catch (e: any) {
-            this.showError("Could not reach server for upgrade.");
-        }
-    }
-
-    private startUpgradeCheck(): void {
-        this.stopUpgradeCheck();
-        let polls = 0;
-        this.upgradePollTimer = window.setInterval(async () => {
-            polls++;
-            if (polls > 60) { this.stopUpgradeCheck(); return; } // 5 min timeout
-            try {
-                const resp = await this.authFetch(`${this.backendUrl}/auth/me`);
-                if (resp.ok) {
-                    const data = await resp.json();
-                    if (data.tier === "pro") {
-                        this.stopUpgradeCheck();
-                        this.setAuthState({ tier: "pro" });
-                        this.renderAccountSection();
-                        this.fetchLicenseStatus();
-                    }
-                }
-            } catch (_) { /* keep polling */ }
-        }, 5000) as unknown as number;
-    }
-
-    private stopUpgradeCheck(): void {
-        if (this.upgradePollTimer !== null) {
-            clearInterval(this.upgradePollTimer);
-            this.upgradePollTimer = null;
-        }
-    }
-
-    // ══════════════════════════════════════
-    // SETTINGS / PASSWORD
-    // ══════════════════════════════════════
+    // ======================================
+    // SETTINGS
+    // ======================================
     private openSettings(): void {
-        this.container.querySelector("#dia-pw-overlay")!.classList.add("show");
-        (this.container.querySelector("#dia-pw-input") as HTMLInputElement).value = "";
-        (this.container.querySelector("#dia-pw-error") as HTMLElement).textContent = "";
-        setTimeout(() => (this.container.querySelector("#dia-pw-input") as HTMLInputElement).focus(), 100);
+        this.showPasswordPrompt();
     }
 
-    private async checkPassword(): Promise<void> {
-        const pw = (this.container.querySelector("#dia-pw-input") as HTMLInputElement).value;
-        const errEl = this.container.querySelector("#dia-pw-error") as HTMLElement;
-        if (!pw) {
-            errEl.textContent = "Please enter a password.";
-            return;
-        }
-        // Validate against the backend
-        errEl.textContent = "Verifying...";
-        try {
-            const resp = await fetch(`${this.backendUrl}/verify-password`, {
-                method: "POST",
-                headers: { "X-Auth-Password": pw },
-            });
-            if (resp.ok) {
-                this.authPassword = pw;
-                this.closePwGate();
+    private showPasswordPrompt(): void {
+        let overlay = this.container.querySelector("#dia-pw-prompt-overlay") as HTMLElement;
+        if (overlay) overlay.remove();
+
+        overlay = document.createElement("div");
+        overlay.className = "dia-pw-overlay";
+        overlay.id = "dia-pw-prompt-overlay";
+        overlay.style.display = "flex";
+        overlay.innerHTML = `
+            <div class="dia-pw-box">
+                <h3>Enter Password</h3>
+                <p style="font-size:12px;color:var(--tx2);margin-bottom:12px;">Enter the password to access settings.</p>
+                <div class="dia-field">
+                    <input type="password" id="dia-pw-prompt-input" placeholder="Password"/>
+                </div>
+                <div class="dia-pw-error" id="dia-pw-prompt-error"></div>
+                <div style="display:flex;gap:8px;">
+                    <button class="dia-apply-btn dia-pw-submit" id="dia-pw-prompt-ok" style="flex:1;">Unlock</button>
+                    <button class="dia-test-btn" id="dia-pw-prompt-cancel" style="flex:0 0 auto;">Cancel</button>
+                </div>
+            </div>`;
+        this.container.querySelector(".dia-root")!.appendChild(overlay);
+
+        const pwInput = overlay.querySelector("#dia-pw-prompt-input") as HTMLInputElement;
+        const errEl = overlay.querySelector("#dia-pw-prompt-error") as HTMLElement;
+
+        const verify = () => {
+            const pw = pwInput.value;
+            if (!pw) { errEl.textContent = "Please enter the password."; return; }
+            if (pw === "Safari99") {
+                overlay.remove();
                 this.showSettingsPanel();
             } else {
                 errEl.textContent = "Incorrect password.";
-                (this.container.querySelector("#dia-pw-input") as HTMLInputElement).value = "";
-                (this.container.querySelector("#dia-pw-input") as HTMLInputElement).focus();
             }
-        } catch (_) {
-            errEl.textContent = "Cannot reach backend to verify password.";
-        }
-    }
+        };
 
-    private closePwGate(): void {
-        this.container.querySelector("#dia-pw-overlay")!.classList.remove("show");
+        overlay.querySelector("#dia-pw-prompt-ok")!.addEventListener("click", verify);
+        pwInput.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") verify(); });
+        overlay.querySelector("#dia-pw-prompt-cancel")!.addEventListener("click", () => overlay.remove());
+        setTimeout(() => pwInput.focus(), 100);
     }
 
     private showSettingsPanel(): void {
         this.container.querySelector("#dia-settings")!.classList.add("show");
         this.container.querySelector("#dia-settings-overlay")!.classList.add("show");
 
-        // Populate backend URL field
-        (this.container.querySelector("#dia-s-url") as HTMLInputElement).value = this.backendUrl;
-        (this.container.querySelector("#dia-s-license") as HTMLInputElement).value = this.licenseKey;
-        this.checkHttpsWarning();
-        this.updateApplyButton();
-        this.renderAccountSection();
+        // Sync backend URL dropdown with current value
+        const urlSelect = this.container.querySelector("#dia-backend-url-select") as HTMLSelectElement;
+        if (urlSelect) urlSelect.value = this._backendUrl;
 
-        // Fetch current config from backend to populate all fields
+        this.updateApplyButton();
+
+        // Fetch current config from backend
         if (this.backendUrl) {
             this.loadConfigFromBackend();
-            this.loadLicenses();
         }
-    }
-
-    private renderAccountSection(): void {
-        const el = this.container.querySelector("#dia-account-section") as HTMLElement;
-        if (!el) return;
-
-        if (!this.isLoggedIn) {
-            el.innerHTML = `
-                <div class="dia-settings-section">Account</div>
-                <div class="dia-account-prompt">
-                    <p>Log in or create an account to track your usage and upgrade to Pro.</p>
-                    <button class="dia-test-btn dia-btn-primary" id="dia-account-login-btn">Log In / Sign Up</button>
-                </div>`;
-            el.querySelector("#dia-account-login-btn")?.addEventListener("click", () => {
-                this.closeSettings();
-                this.showAuthOverlay();
-            });
-            return;
-        }
-
-        const tierBadge = this.licenseTier === "pro"
-            ? '<span class="dia-tier-badge dia-tier-pro">PRO</span>'
-            : '<span class="dia-tier-badge dia-tier-free">FREE</span>';
-
-        let subInfo = "";
-        let actionBtn = "";
-
-        if (this.licenseTier === "pro") {
-            subInfo = '<div class="dia-user-sub-info">Active Pro subscription</div>';
-            actionBtn = '<button class="dia-test-btn" id="dia-cancel-sub-btn">Cancel Subscription</button>';
-        } else {
-            subInfo = '<div class="dia-user-sub-info">Free tier &mdash; upgrade for unlimited queries &amp; all chart types</div>';
-            actionBtn = '<button class="dia-test-btn dia-btn-primary dia-upgrade-cta" id="dia-upgrade-btn">Upgrade to Pro &mdash; $15/mo</button>';
-        }
-
-        el.innerHTML = `
-            <div class="dia-settings-section">Account</div>
-            <div class="dia-account-card">
-                <div class="dia-user-email">${this.escapeHtml(this.userEmail)} ${tierBadge}</div>
-                ${subInfo}
-                <div style="display:flex;gap:8px;margin-top:8px;">
-                    ${actionBtn}
-                    <button class="dia-test-btn" id="dia-logout-btn">Log Out</button>
-                </div>
-            </div>`;
-
-        el.querySelector("#dia-upgrade-btn")?.addEventListener("click", () => {
-            this.closeSettings();
-            this.initiateUpgrade();
-        });
-        el.querySelector("#dia-cancel-sub-btn")?.addEventListener("click", () => this.cancelSubscription());
-        el.querySelector("#dia-logout-btn")?.addEventListener("click", () => {
-            this.logout();
-            this.closeSettings();
-        });
-    }
-
-    private async cancelSubscription(): Promise<void> {
-        const btn = this.container.querySelector("#dia-cancel-sub-btn") as HTMLButtonElement;
-        if (btn) { btn.textContent = "Canceling..."; btn.disabled = true; }
-        try {
-            const resp = await this.authFetch(`${this.backendUrl}/billing/cancel-subscription`, { method: "POST" });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                if (btn) { btn.textContent = err.detail || "Failed"; btn.disabled = false; }
-                return;
-            }
-            if (btn) { btn.textContent = "Canceled at period end"; }
-        } catch (_) {
-            if (btn) { btn.textContent = "Error"; btn.disabled = false; }
-        }
-    }
-
-    private checkHttpsWarning(): void {
-        const urlVal = (this.container.querySelector("#dia-s-url") as HTMLInputElement).value.trim().toLowerCase();
-        const warnEl = this.container.querySelector("#dia-https-warn") as HTMLElement;
-        if (!warnEl) return;
-        // Show warning if URL is HTTP and not localhost
-        // eslint-disable-next-line powerbi-visuals/no-http-string
-        const isInsecure = urlVal.startsWith("http://") && !urlVal.startsWith("http://localhost") && !urlVal.startsWith("http://127.0.0.1");
-        warnEl.style.display = isInsecure ? "block" : "none";
     }
 
     private async loadConfigFromBackend(): Promise<void> {
         try {
-            const resp = await this.authFetch(`${this.backendUrl}/config`);
+            const resp = await fetch(`${this.backendUrl}/config`);
             if (!resp.ok) return;
             const cfg = await resp.json();
 
@@ -813,8 +434,6 @@ export class PBIChat implements IVisual {
                 if (el) el.value = val || "";
             };
 
-            setVal("#dia-s-apikey", cfg.openrouter_api_key);
-            setVal("#dia-s-model", cfg.llm_model);
             setVal("#dia-s-extra", cfg.extra_context);
 
             // Show TMDL load status if model is loaded
@@ -832,7 +451,7 @@ export class PBIChat implements IVisual {
 
             // Load connections
             try {
-                const connResp = await this.authFetch(`${this.backendUrl}/connections`);
+                const connResp = await fetch(`${this.backendUrl}/connections`);
                 if (connResp.ok) {
                     const connData = await connResp.json();
                     this.connections = connData.connections || [];
@@ -842,7 +461,7 @@ export class PBIChat implements IVisual {
             this.renderConnectionList();
             this.updateApplyButton();
         } catch (e) {
-            // Backend unreachable — fields stay empty
+            // Backend unreachable -- fields stay empty
         }
     }
 
@@ -851,7 +470,7 @@ export class PBIChat implements IVisual {
         this.container.querySelector("#dia-settings-overlay")!.classList.remove("show");
     }
 
-    // ── Theme toggle ──
+    // -- Theme toggle --
 
     private toggleTheme(): void {
         this.isDarkTheme = !this.isDarkTheme;
@@ -904,7 +523,7 @@ export class PBIChat implements IVisual {
         };
     }
 
-    // ── Connection CRUD ──
+    // -- Connection CRUD --
 
     private slugify(name: string): string {
         return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "conn";
@@ -1057,24 +676,24 @@ export class PBIChat implements IVisual {
         if (!resultEl) return;
         resultEl.className = "dia-test-result dia-conn-result";
         resultEl.style.display = "block";
-        resultEl.textContent = "Testing...";
+        resultEl.textContent = `Testing ${conn.name || "connection"}...`;
 
         const url = this.getSettingsUrl();
         if (!url) {
             resultEl.className = "dia-test-result dia-conn-result fail";
-            resultEl.textContent = "Set Backend API URL first.";
+            resultEl.textContent = "Backend not available.";
             return;
         }
 
         try {
             // Save connections first so the backend knows about this connection
-            await this.authFetch(`${url}/connections`, {
+            await fetch(`${url}/connections`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ connections: this.connections }),
             });
 
-            const resp = await this.authFetch(`${url}/test-connection/${conn.id}`, { method: "POST" });
+            const resp = await fetch(`${url}/test-connection/${conn.id}`, { method: "POST" });
             if (resp.ok) {
                 resultEl.className = "dia-test-result dia-conn-result ok";
                 resultEl.textContent = "Connected!";
@@ -1094,10 +713,15 @@ export class PBIChat implements IVisual {
         const files = input.files;
         if (!files || files.length === 0) return;
 
+        // Filter for .tmdl files from the selected folder (including subfolders)
+        this.pendingTmdlFiles = [];
         for (let i = 0; i < files.length; i++) {
-            const text = await files[i].text();
-            const name = files[i].name;
-            // Dedup by name — newer file replaces older
+            const file = files[i];
+            if (!file.name.toLowerCase().endsWith(".tmdl")) continue;
+            const text = await file.text();
+            // Use the filename (not the full path) as the identifier
+            const name = file.name;
+            // Dedup by name -- last occurrence wins
             const idx = this.pendingTmdlFiles.findIndex(f => f.name === name);
             if (idx >= 0) {
                 this.pendingTmdlFiles[idx].content = text;
@@ -1120,23 +744,22 @@ export class PBIChat implements IVisual {
     private renderTmdlFileList(): void {
         const listEl = this.container.querySelector("#dia-tmdl-file-list") as HTMLElement;
         const clearBtn = this.container.querySelector("#dia-tmdl-clear-btn") as HTMLElement;
-        const uploadBtn = this.container.querySelector("#dia-tmdl-upload-btn") as HTMLElement;
         const count = this.pendingTmdlFiles.length;
 
         if (count === 0) {
             listEl.style.display = "none";
             clearBtn.style.display = "none";
-            uploadBtn.style.display = "none";
+            this.updateApplyButton();
             return;
         }
 
         clearBtn.style.display = "";
-        uploadBtn.style.display = "";
         listEl.style.display = "block";
+        this.updateApplyButton();
 
         const names = this.pendingTmdlFiles.map(f => f.name).sort();
         listEl.innerHTML =
-            `<div class="dia-tmdl-count">${count} file${count !== 1 ? "s" : ""} staged</div>` +
+            `<div class="dia-tmdl-count">${count} .tmdl file${count !== 1 ? "s" : ""} ready to upload</div>` +
             names.map(n => `<div class="dia-tmdl-file-item">${n}</div>`).join("");
     }
 
@@ -1144,6 +767,7 @@ export class PBIChat implements IVisual {
         if (this.pendingTmdlFiles.length === 0) return;
 
         const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
+
         resultEl.className = "dia-test-result";
         resultEl.style.display = "block";
         resultEl.textContent = `Uploading ${this.pendingTmdlFiles.length} file(s)...`;
@@ -1156,10 +780,16 @@ export class PBIChat implements IVisual {
         }
 
         try {
-            const resp = await this.authFetch(`${url}/upload-tmdl`, {
+            const payload: any = { files: this.pendingTmdlFiles };
+            // Save current connections alongside the model
+            if (this.connections.length > 0) {
+                payload.connections = this.connections;
+            }
+
+            const resp = await fetch(`${url}/upload-tmdl`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ files: this.pendingTmdlFiles }),
+                body: JSON.stringify(payload),
             });
 
             if (!resp.ok) {
@@ -1170,7 +800,8 @@ export class PBIChat implements IVisual {
             const data = await resp.json();
             resultEl.className = "dia-test-result ok";
             const skipped = data.files_skipped ? ` (${data.files_skipped} auto-generated skipped)` : "";
-            resultEl.textContent = `Uploaded ${data.files_loaded} .tmdl file(s) (${(data.total_chars / 1024).toFixed(1)} KB)${skipped}`;
+            const msg = `Uploaded ${data.files_loaded} .tmdl file(s) (${(data.total_chars / 1024).toFixed(1)} KB)${skipped}`;
+            resultEl.textContent = msg;
             this.pendingTmdlFiles = [];
             this.renderTmdlFileList();
             this.tmdlLoaded = true;
@@ -1185,19 +816,17 @@ export class PBIChat implements IVisual {
     private updateApplyButton(): void {
         const btn = this.container.querySelector("#dia-apply-btn") as HTMLButtonElement;
         const warn = this.container.querySelector("#dia-tmdl-warning") as HTMLElement;
+        // Always enable Apply -- TMDL upload happens automatically on Apply
         if (btn) {
-            btn.disabled = !this.tmdlLoaded;
+            btn.disabled = false;
         }
         if (warn) {
-            warn.style.display = this.tmdlLoaded ? "none" : "block";
+            warn.style.display = (this.tmdlLoaded || this.pendingTmdlFiles.length > 0) ? "none" : "block";
         }
     }
 
     private getSettingsUrl(): string {
-        const raw = (this.container.querySelector("#dia-s-url") as HTMLInputElement).value.trim().replace(/\/+$/, "");
-        // eslint-disable-next-line powerbi-visuals/no-http-string
-        if (raw && !/^https?:\/\//i.test(raw)) return "http://" + raw;
-        return raw;
+        return this.backendUrl;
     }
 
     private async applySettings(): Promise<void> {
@@ -1206,52 +835,36 @@ export class PBIChat implements IVisual {
         applyBtn.textContent = "Saving...";
         applyBtn.disabled = true;
 
-        const url = (this.container.querySelector("#dia-s-url") as HTMLInputElement).value.trim();
-        if (url) this.backendUrl = url;
+        const extra = (this.container.querySelector("#dia-s-extra") as HTMLTextAreaElement).value.trim();
+        this.extraContext = extra;
 
-        // Save license key
-        const licKey = (this.container.querySelector("#dia-s-license") as HTMLInputElement).value.trim();
-        this.licenseKey = licKey;
-
-        // Send config + connections to backend
-        if (this.backendUrl) {
-            const config: any = {};
-
-            const apiKey = (this.container.querySelector("#dia-s-apikey") as HTMLInputElement).value.trim();
-            const model = (this.container.querySelector("#dia-s-model") as HTMLInputElement).value.trim();
-            const extra = (this.container.querySelector("#dia-s-extra") as HTMLTextAreaElement).value.trim();
-
-            if (apiKey) config.openrouter_api_key = apiKey;
-            if (model) config.llm_model = model;
-            if (extra) config.extra_context = extra;
-
-            this.extraContext = extra;
-
-            try {
-                await this.authFetch(`${this.backendUrl}/config`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(config),
-                });
-            } catch (e) {
-                // Silently fail — settings are still applied locally
-            }
-
-            this.readConnectionsFromUI();
-            try {
-                await this.authFetch(`${this.backendUrl}/connections`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ connections: this.connections }),
-                });
-            } catch (e) {
-                // Silently fail
-            }
+        // Upload pending TMDL files if any
+        if (this.pendingTmdlFiles.length > 0) {
+            applyBtn.textContent = "Uploading TMDL files...";
+            await this.uploadTmdlFiles();
         }
+
+        // Save extra context via /config
+        try {
+            await fetch(`${this.backendUrl}/config`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ extra_context: extra }),
+            });
+        } catch (_) { /* settings still applied locally */ }
+
+        // Save connections via /connections
+        this.readConnectionsFromUI();
+        try {
+            await fetch(`${this.backendUrl}/connections`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ connections: this.connections }),
+            });
+        } catch (_) { /* silently fail */ }
 
         applyBtn.textContent = prevText;
         applyBtn.disabled = false;
-        this.lastBackendUrl = "";
         this.closeSettings();
         this.wakeAndVerify();
     }
@@ -1272,7 +885,7 @@ export class PBIChat implements IVisual {
             if (healthResp.ok) {
                 const health = await healthResp.json();
                 if (health.databricks_connected) {
-                    // Has connections — test the first Databricks one (wakes warehouse)
+                    // Has connections -- test the first Databricks one (wakes warehouse)
                     const resp = await fetch(`${this.backendUrl}/test-connection`, {
                         method: "POST",
                     });
@@ -1280,7 +893,6 @@ export class PBIChat implements IVisual {
 
                     if (data.status === "connected") {
                         this.warehouseState = "RUNNING";
-                        this.lastBackendUrl = this.backendUrl;
                         this.renderStatusDot(statusEl);
                         if (dot) dot.className = "dia-dot dia-dot-on";
                         this.stopPolling();
@@ -1289,7 +901,6 @@ export class PBIChat implements IVisual {
 
                     if (data.status === "starting" || data.state === "STOPPED" || data.state === "STARTING") {
                         this.warehouseState = data.state || "STARTING";
-                        this.lastBackendUrl = this.backendUrl;
                         statusEl.innerHTML = `<span class="dia-dot dia-dot-starting"></span> Warehouse starting — waiting...`;
                         if (dot) dot.className = "dia-dot dia-dot-starting";
                         this.startWakePolling();
@@ -1299,9 +910,8 @@ export class PBIChat implements IVisual {
                     // If test-connection returned an error but connections exist,
                     // they might all be SQL Server (no Databricks warehouse to wake)
                     if (data.detail && data.detail.includes("No Databricks")) {
-                        // Only SQL Server connections — show connected
+                        // Only SQL Server connections -- show connected
                         this.warehouseState = "RUNNING";
-                        this.lastBackendUrl = this.backendUrl;
                         this.renderStatusDot(statusEl);
                         if (dot) dot.className = "dia-dot dia-dot-on";
                         this.stopPolling();
@@ -1309,7 +919,6 @@ export class PBIChat implements IVisual {
                     }
 
                     this.warehouseState = "ERROR";
-                    this.lastBackendUrl = this.backendUrl;
                     statusEl.innerHTML = `<span class="dia-dot dia-dot-error"></span> ${data.message || data.detail || "Connection failed"}`;
                     if (dot) dot.className = "dia-dot dia-dot-error";
                     return;
@@ -1318,12 +927,10 @@ export class PBIChat implements IVisual {
 
             // No connections configured
             this.warehouseState = "RUNNING";
-            this.lastBackendUrl = this.backendUrl;
             statusEl.innerHTML = `<span class="dia-dot dia-dot-on"></span> Backend connected`;
             if (dot) dot.className = "dia-dot dia-dot-on";
         } catch (e: any) {
             this.warehouseState = "ERROR";
-            this.lastBackendUrl = this.backendUrl;
             statusEl.innerHTML = `<span class="dia-dot dia-dot-error"></span> Cannot reach backend`;
             if (dot) dot.className = "dia-dot dia-dot-error";
         }
@@ -1360,29 +967,110 @@ export class PBIChat implements IVisual {
                     return;
                 }
 
-                // Still starting — update elapsed time
+                // Still starting -- update elapsed time
                 if (statusEl) {
                     statusEl.innerHTML = `<span class="dia-dot dia-dot-starting"></span> Warehouse starting... (${polls * 5}s)`;
                 }
             } catch (e) {
-                // Transient error — keep polling
+                // Transient error -- keep polling
             }
         }, 5000) as unknown as number;
     }
 
-    // ══════════════════════════════════════
+    // ======================================
     // POWER BI UPDATE (reads settings)
-    // ══════════════════════════════════════
+    // ======================================
     public update(options: VisualUpdateOptions): void {
         this.host.eventService.renderingStarted(options);
 
         if (options && options.dataViews && options.dataViews[0]) {
             const dv = options.dataViews[0];
             this.fmtSettings = this.fmtService.populateFormattingSettingsModel(PBIChatFormattingSettings, dv);
-            const url = this.fmtSettings.connection.backendUrl.value;
-            if (url) this.backendUrl = url;
-            const key = this.fmtSettings.connection.licenseKey.value;
-            if (key) this.licenseKey = key;
+        }
+
+        // Extract inline data from field wells
+        this.inlineDataCsv = "";
+        this.inlineStats = "";
+        this.inlineColumnCount = 0;
+        this.inlineRowCount = 0;
+        this.inlineRowsSent = 0;
+        this.inlineTruncated = false;
+
+        if (options && options.dataViews && options.dataViews[0]) {
+            const table = options.dataViews[0].table;
+            if (table && table.columns && table.columns.length > 0 && table.rows && table.rows.length > 0) {
+                this.inlineColumnCount = table.columns.length;
+                this.inlineRowCount = table.rows.length;
+
+                // Compute summary stats from ALL rows
+                const stats: Record<string, Record<string, unknown>> = {};
+                for (let ci = 0; ci < table.columns.length; ci++) {
+                    const col = table.columns[ci];
+                    const name = col.displayName;
+                    let count = 0, nulls = 0, sum = 0, min = Infinity, max = -Infinity;
+                    let isNumeric = true;
+                    const distinct = new Set<string>();
+
+                    for (let ri = 0; ri < table.rows.length; ri++) {
+                        const val = table.rows[ri][ci];
+                        if (val == null || val === "") { nulls++; continue; }
+                        count++;
+                        const s = String(val);
+                        distinct.add(s);
+                        const num = Number(val);
+                        if (!isNaN(num) && isNumeric) {
+                            sum += num;
+                            if (num < min) min = num;
+                            if (num > max) max = num;
+                        } else {
+                            isNumeric = false;
+                        }
+                    }
+
+                    if (isNumeric && count > 0) {
+                        stats[name] = {
+                            type: "numeric", count, nulls,
+                            sum: Math.round(sum * 100) / 100,
+                            avg: Math.round((sum / count) * 100) / 100,
+                            min: min === Infinity ? null : min,
+                            max: max === -Infinity ? null : max,
+                            distinct: distinct.size,
+                        };
+                    } else {
+                        stats[name] = {
+                            type: "text", count, nulls,
+                            distinct: distinct.size,
+                            top5: [...distinct].slice(0, 5),
+                        };
+                    }
+                }
+                this.inlineStats = JSON.stringify({
+                    total_rows: table.rows.length,
+                    columns: stats,
+                });
+
+                // Serialize rows to CSV (char-limited)
+                const MAX_CHARS = 400000;
+                const header = table.columns.map(c => this.csvEscape(c.displayName)).join(",");
+                let csv = header + "\n";
+                let rowsSent = 0;
+
+                for (let i = 0; i < table.rows.length; i++) {
+                    const line = table.columns.map((_, ci) => {
+                        const val = table.rows[i][ci];
+                        return val == null ? "" : this.csvEscape(String(val));
+                    }).join(",");
+                    if (csv.length + line.length + 1 > MAX_CHARS) {
+                        this.inlineTruncated = true;
+                        break;
+                    }
+                    csv += line + "\n";
+                    rowsSent++;
+                }
+                if (rowsSent < table.rows.length) this.inlineTruncated = true;
+                this.inlineRowsSent = rowsSent;
+                this.inlineDataCsv = csv;
+            }
         }
 
         // High contrast mode support
@@ -1433,9 +1121,9 @@ export class PBIChat implements IVisual {
         return this.fmtService.buildFormattingModel(this.fmtSettings);
     }
 
-    // ══════════════════════════════════════
+    // ======================================
     // CLEAR CHAT
-    // ══════════════════════════════════════
+    // ======================================
     private clearChat(): void {
         this.history = [];
         this.msgsEl.innerHTML = "";
@@ -1444,15 +1132,14 @@ export class PBIChat implements IVisual {
         welcome.id = "dia-welcome";
         const connected = this.backendUrl && this.warehouseState && this.warehouseState !== "ERROR";
         welcome.innerHTML = `
-            <h1>PBIChat</h1>
             <p class="dia-welcome-sub">AI-powered data assistant with live SQL access</p>
             <div class="dia-setup-banner" id="dia-setup-banner" style="${connected ? "display:none" : ""}">
                 <div class="dia-setup-title">Get Started</div>
                 <div class="dia-setup-steps">
-                    <div class="dia-setup-step"><span class="dia-step-num">1</span> Click <strong>Settings</strong> below and enter the admin password</div>
-                    <div class="dia-setup-step"><span class="dia-step-num">2</span> Set your <strong>Backend API URL</strong> and <strong>API key</strong></div>
-                    <div class="dia-setup-step"><span class="dia-step-num">3</span> Add a <strong>database connection</strong> (Databricks or SQL Server)</div>
-                    <div class="dia-setup-step"><span class="dia-step-num">4</span> Upload your <strong>.tmdl files</strong> and click Apply</div>
+                    <div class="dia-setup-step"><span class="dia-step-num">1</span> Click <strong>Settings</strong> and enter the password</div>
+                    <div class="dia-setup-step"><span class="dia-step-num">2</span> Add a <strong>database connection</strong> (Databricks or SQL Server)</div>
+                    <div class="dia-setup-step"><span class="dia-step-num">3</span> Select your <strong>semantic model folder</strong> (.tmdl files)</div>
+                    <div class="dia-setup-step"><span class="dia-step-num">4</span> Click <strong>Apply &amp; Close</strong> to save</div>
                 </div>
             </div>
             <div class="dia-sugs">
@@ -1473,131 +1160,24 @@ export class PBIChat implements IVisual {
         this.inputEl.focus();
     }
 
-    // ══════════════════════════════════════
-    // LICENSE MANAGEMENT
-    // ══════════════════════════════════════
-    private async fetchLicenseStatus(): Promise<void> {
-        if (!this.backendUrl) return;
-        try {
-            const resp = await this.authFetch(`${this.backendUrl}/license`);
-            if (!resp.ok) return;
-            const data = await resp.json();
-            this.licenseTier = data.tier;
-            this.dailyUsed = data.daily_used;
-            this.dailyLimit = data.daily_limit;
-            this.allowedCharts = data.allowed_charts;
-            this.renderTierBadge();
-        } catch (_) { /* backend unreachable */ }
-    }
-
-    private renderTierBadge(): void {
-        const badge = this.container.querySelector("#dia-tier-badge") as HTMLElement;
-        if (!badge) return;
-        if (this.licenseTier === "pro") {
-            badge.className = "dia-tier-badge dia-tier-pro";
-            badge.textContent = "PRO";
-        } else {
-            const remaining = this.dailyLimit !== null ? this.dailyLimit - this.dailyUsed : null;
-            badge.className = "dia-tier-badge dia-tier-free";
-            badge.textContent = remaining !== null ? `FREE (${remaining}/${this.dailyLimit})` : "FREE";
-        }
-    }
-
-    private showUpgradePrompt(): void {
-        const el = document.createElement("div");
-        el.className = "dia-upgrade-banner";
-        el.innerHTML = `
-            <div class="dia-upgrade-icon">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                </svg>
-            </div>
-            <div class="dia-upgrade-text">
-                <strong>Daily query limit reached</strong>
-                <p>You've used all ${this.dailyLimit} free queries for today.
-                   Upgrade to Pro for unlimited queries, all chart types, and multiple connections.</p>
-                <button class="dia-test-btn dia-btn-primary dia-upgrade-cta" id="dia-upgrade-banner-btn">Upgrade to Pro &mdash; $15/mo</button>
-            </div>`;
-        this.msgsEl.appendChild(el);
-        el.querySelector("#dia-upgrade-banner-btn")?.addEventListener("click", () => this.initiateUpgrade());
-        this.chatEl.scrollTop = this.chatEl.scrollHeight;
-    }
-
-    private async createLicense(): Promise<void> {
-        const label = (this.container.querySelector("#dia-lic-label") as HTMLInputElement).value.trim();
-        const resultEl = this.container.querySelector("#dia-lic-result") as HTMLElement;
-        resultEl.style.display = "block";
-        resultEl.className = "dia-test-result";
-        resultEl.textContent = "Creating...";
-        try {
-            const resp = await this.authFetch(`${this.backendUrl}/admin/licenses`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ label, tier: "pro" }),
-            });
-            if (!resp.ok) throw new Error((await resp.json()).detail || "Failed");
-            const data = await resp.json();
-            resultEl.className = "dia-test-result ok";
-            resultEl.innerHTML = `Key: <code>${this.escapeHtml(data.key)}</code>`;
-            this.loadLicenses();
-        } catch (e: any) {
-            resultEl.className = "dia-test-result fail";
-            resultEl.textContent = e.message || "Failed to create license.";
-        }
-    }
-
-    private async loadLicenses(): Promise<void> {
-        const listEl = this.container.querySelector("#dia-lic-list") as HTMLElement;
-        if (!listEl || !this.backendUrl) return;
-        try {
-            const resp = await this.authFetch(`${this.backendUrl}/admin/licenses`);
-            if (!resp.ok) { listEl.innerHTML = ""; return; }
-            const data = await resp.json();
-            if (!data.licenses || data.licenses.length === 0) {
-                listEl.innerHTML = '<div class="dia-hint">No license keys created yet.</div>';
-                return;
-            }
-            listEl.innerHTML = data.licenses.map((lic: any) => `
-                <div class="dia-conn-card" style="padding:8px 12px;margin-top:6px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <div>
-                            <strong>${this.escapeHtml(lic.label || "Unnamed")}</strong>
-                            <span class="dia-tier-badge ${lic.is_active ? "dia-tier-pro" : "dia-tier-free"}" style="margin-left:6px;">
-                                ${lic.is_active ? lic.tier.toUpperCase() : "REVOKED"}
-                            </span>
-                            <div style="font-size:10px;color:var(--txm);margin-top:2px;">
-                                ${this.escapeHtml(lic.key.substring(0, 12))}...
-                                &middot; Created ${lic.created_at.substring(0, 10)}
-                            </div>
-                        </div>
-                        ${lic.is_active ? `<button class="dia-conn-remove" data-lic-key="${this.escapeHtml(lic.key)}" title="Revoke">&times;</button>` : ""}
-                    </div>
-                </div>`).join("");
-
-            listEl.querySelectorAll<HTMLButtonElement>(".dia-conn-remove[data-lic-key]").forEach(btn => {
-                btn.addEventListener("click", () => this.revokeLicense(btn.dataset.licKey!));
-            });
-        } catch (_) { listEl.innerHTML = ""; }
-    }
-
-    private async revokeLicense(key: string): Promise<void> {
-        try {
-            await this.authFetch(`${this.backendUrl}/admin/licenses/${encodeURIComponent(key)}`, {
-                method: "DELETE",
-            });
-            this.loadLicenses();
-        } catch (_) { /* silently fail */ }
-    }
-
-    // ══════════════════════════════════════
+    // ======================================
     // CHAT LOGIC
-    // ══════════════════════════════════════
+    // ======================================
     private async send(): Promise<void> {
         const text = this.inputEl.value.trim();
         if (!text || this.busy) return;
 
         if (!this.backendUrl) {
             this.showError("Backend API URL not set. Click Settings to configure.");
+            return;
+        }
+
+        // Database mode: require TMDL to be loaded
+        if (!this.inlineDataCsv && !this.tmdlLoaded) {
+            this.showError(
+                "No data source configured. Either drag columns into the Columns field well, " +
+                "or open Settings to upload your semantic model (.tmdl files) and configure a database connection."
+            );
             return;
         }
 
@@ -1610,34 +1190,43 @@ export class PBIChat implements IVisual {
         this.showTyping();
 
         try {
-            // Pre-check warehouse state — show status banner while waiting
-            let warehouseReady = false;
-            try {
-                const wsResp = await fetch(`${this.backendUrl}/warehouse-status`);
-                if (wsResp.ok) {
-                    const ws = await wsResp.json();
-                    if (ws.ready) {
-                        warehouseReady = true;
-                    } else if (ws.state === "STARTING" || ws.state === "STOPPED") {
-                        this.hideTyping();
-                        this.showWarehouseStatus(ws.state, ws.name || "SQL Warehouse");
-                        // Poll until ready, then continue
-                        await this.waitForWarehouse();
-                        this.hideWarehouseStatus();
-                        this.showTyping();
-                        warehouseReady = true;
+            // Skip warehouse check in inline data mode
+            if (!this.inlineDataCsv) {
+                // Pre-check warehouse state -- show status banner while waiting
+                let warehouseReady = false;
+                try {
+                    const wsResp = await fetch(`${this.backendUrl}/warehouse-status`);
+                    if (wsResp.ok) {
+                        const ws = await wsResp.json();
+                        if (ws.ready) {
+                            warehouseReady = true;
+                        } else if (ws.state === "STARTING" || ws.state === "STOPPED") {
+                            this.hideTyping();
+                            this.showWarehouseStatus(ws.state, ws.name || "SQL Warehouse");
+                            // Poll until ready, then continue
+                            await this.waitForWarehouse();
+                            this.hideWarehouseStatus();
+                            this.showTyping();
+                            warehouseReady = true;
+                        }
                     }
-                }
-            } catch (_) { /* proceed to chat anyway */ }
+                } catch (_) { /* proceed to chat anyway */ }
+            }
 
-            const resp = await this.authFetch(`${this.backendUrl}/chat`, {
+            const payload: Record<string, unknown> = {
+                message: text,
+                history: this.history.slice(-20),
+                extra_context: this.extraContext || null,
+            };
+            if (this.inlineDataCsv) {
+                payload.inline_data = this.inlineDataCsv;
+                payload.inline_stats = this.inlineStats;
+            }
+
+            const resp = await fetch(`${this.backendUrl}/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    message: text,
-                    history: this.history.slice(-20),
-                    extra_context: this.extraContext || null,
-                }),
+                body: JSON.stringify(payload),
             });
 
             this.hideTyping();
@@ -1649,21 +1238,10 @@ export class PBIChat implements IVisual {
 
             const data = await resp.json();
 
-            // Update license tier state from response
-            if (data.tier) this.licenseTier = data.tier;
-            if (data.daily_used != null) this.dailyUsed = data.daily_used;
-            if (data.daily_limit !== undefined) this.dailyLimit = data.daily_limit;
-            this.renderTierBadge();
-
             this.history.push({ role: "user", content: text });
             this.history.push({ role: "assistant", content: data.response });
+            this.addMessage("ai", data.response);
 
-            // Show upgrade prompt if limit reached, otherwise show normal response
-            if (data.tier === "free" && data.daily_limit != null && data.daily_used >= data.daily_limit) {
-                this.showUpgradePrompt();
-            } else {
-                this.addMessage("ai", data.response);
-            }
         } catch (e: any) {
             this.hideTyping();
             this.showError(e.message || "Request failed.");
@@ -1674,9 +1252,16 @@ export class PBIChat implements IVisual {
         this.inputEl.focus();
     }
 
-    // ══════════════════════════════════════
+    private csvEscape(val: string): string {
+        if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+            return '"' + val.replace(/"/g, '""') + '"';
+        }
+        return val;
+    }
+
+    // ======================================
     // UI HELPERS
-    // ══════════════════════════════════════
+    // ======================================
     private addMessage(role: "user" | "ai", content: string): void {
         if (this.welcomeEl && this.welcomeEl.parentNode) {
             this.welcomeEl.remove();
@@ -1713,21 +1298,51 @@ export class PBIChat implements IVisual {
         if (el) el.remove();
     }
 
+    /** Show a custom in-app confirm dialog (browser confirm() is blocked in Power BI iframe). */
+    private showConfirm(message: string, okLabel: string = "Delete"): Promise<boolean> {
+        return new Promise((resolve) => {
+            const overlay = this.container.querySelector("#dia-confirm-overlay") as HTMLElement;
+            const dialog = this.container.querySelector("#dia-confirm-dialog") as HTMLElement;
+            const msgEl = this.container.querySelector("#dia-confirm-msg") as HTMLElement;
+            const okBtn = this.container.querySelector("#dia-confirm-ok") as HTMLButtonElement;
+            const cancelBtn = this.container.querySelector("#dia-confirm-cancel") as HTMLButtonElement;
+
+            msgEl.textContent = message;
+            okBtn.textContent = okLabel;
+            overlay.style.display = "block";
+            dialog.style.display = "block";
+
+            const cleanup = () => {
+                overlay.style.display = "none";
+                dialog.style.display = "none";
+                okBtn.removeEventListener("click", onOk);
+                cancelBtn.removeEventListener("click", onCancel);
+                overlay.removeEventListener("click", onCancel);
+            };
+            const onOk = () => { cleanup(); resolve(true); };
+            const onCancel = () => { cleanup(); resolve(false); };
+
+            okBtn.addEventListener("click", onOk);
+            cancelBtn.addEventListener("click", onCancel);
+            overlay.addEventListener("click", onCancel);
+        });
+    }
+
     private showError(rawMsg: string): void {
         // Map common technical errors to user-friendly messages
         let msg = rawMsg;
         if (/fetch|network|ERR_CONNECTION|ECONNREFUSED/i.test(msg)) {
             msg = "Cannot reach the backend server. Please check your Backend API URL in Settings.";
         } else if (/403|Invalid password/i.test(msg)) {
-            msg = "Authentication failed. Please re-enter your password in Settings.";
+            msg = "Authentication failed. Please re-enter the password in Settings.";
         } else if (/429|rate limit/i.test(msg)) {
             msg = "You're sending messages too quickly. Please wait a moment and try again.";
         } else if (/500|Internal Server/i.test(msg)) {
             msg = "The server encountered an error. Please try again or check the backend logs.";
         } else if (/502|LLM API error/i.test(msg)) {
             msg = "The AI service is temporarily unavailable. Please try again in a moment.";
-        } else if (/OpenRouter.*not configured/i.test(msg)) {
-            msg = "The AI API key is not configured. Please set it in Settings.";
+        } else if (/not configured/i.test(msg)) {
+            msg = "The AI API key is not configured. Please contact your administrator.";
         }
 
         const el = document.createElement("div");
@@ -1747,7 +1362,7 @@ export class PBIChat implements IVisual {
             `<div class="dia-wh-spinner"></div>`,
             `<div class="dia-wh-info">`,
             `<div class="dia-wh-title">${this.escapeHtml(name)} is ${stateLabel.toLowerCase()}...</div>`,
-            `<div class="dia-wh-sub">This usually takes 2–5 minutes. Your query will run automatically once ready.</div>`,
+            `<div class="dia-wh-sub">This usually takes 2-5 minutes. Your query will run automatically once ready.</div>`,
             `</div>`,
         ].join("");
         this.msgsEl.appendChild(el);
@@ -1776,9 +1391,9 @@ export class PBIChat implements IVisual {
         });
     }
 
-    // ══════════════════════════════════════
+    // ======================================
     // WAREHOUSE STATUS
-    // ══════════════════════════════════════
+    // ======================================
     private updateStatus(): void {
         const el = this.container.querySelector("#dia-status") as HTMLElement;
         if (!el) return;
@@ -1788,6 +1403,19 @@ export class PBIChat implements IVisual {
 
         // Show/hide setup banner based on connection state
         const banner = this.container.querySelector("#dia-setup-banner") as HTMLElement;
+
+        // Inline data mode: show data badge
+        if (this.inlineDataCsv) {
+            const rowLabel = this.inlineTruncated
+                ? `${this.inlineRowsSent.toLocaleString()} of ${this.inlineRowCount.toLocaleString()} rows`
+                : `${this.inlineRowCount.toLocaleString()} rows`;
+            el.innerHTML = `<span class="dia-dot dia-dot-on"></span> ${this.inlineColumnCount} cols \u00d7 ${rowLabel}`;
+            if (dot) dot.className = "dia-dot dia-dot-on";
+            if (banner) banner.style.display = "none";
+            this.stopPolling();
+            return;
+        }
+
         if (banner) {
             const connected = this.backendUrl && this.warehouseState && this.warehouseState !== "ERROR";
             banner.style.display = connected ? "none" : "";
@@ -1800,10 +1428,9 @@ export class PBIChat implements IVisual {
             return;
         }
 
-        if (this.backendUrl !== this.lastBackendUrl) {
-            this.lastBackendUrl = this.backendUrl;
+        // Refresh warehouse status periodically
+        if (!this.warehouseState) {
             this.checkWarehouseStatus();
-            this.fetchLicenseStatus();
             return;
         }
 
@@ -1847,9 +1474,7 @@ export class PBIChat implements IVisual {
         this.renderStatusDot(el);
 
         try {
-            const resp = await fetch(
-                `${this.backendUrl}/warehouse-status`
-            );
+            const resp = await fetch(`${this.backendUrl}/warehouse-status`);
             if (!resp.ok) {
                 this.warehouseState = "CONNECTED";
                 this.renderStatusDot(el);
@@ -1888,9 +1513,7 @@ export class PBIChat implements IVisual {
             }
 
             try {
-                const resp = await fetch(
-                    `${this.backendUrl}/warehouse-status`
-                );
+                const resp = await fetch(`${this.backendUrl}/warehouse-status`);
                 if (resp.ok) {
                     const data = await resp.json();
                     this.warehouseState = data.state;
@@ -1921,9 +1544,9 @@ export class PBIChat implements IVisual {
         return div.innerHTML;
     }
 
-    // ══════════════════════════════════════
+    // ======================================
     // CHART RENDERING
-    // ══════════════════════════════════════
+    // ======================================
     private static CHART_COLORS = [
         { solid: "#c4956a", light: "#c4956aE6", glow: "#c4956a80" },
         { solid: "#7cacf8", light: "#7cacf8E6", glow: "#7cacf880" },
@@ -1961,8 +1584,8 @@ export class PBIChat implements IVisual {
 
             try {
                 const spec = JSON.parse(json);
-                // Enforce chart type limits — downgrade to bar if not allowed
-                if (this.allowedCharts.length > 0 && !this.allowedCharts.includes(spec.type)) {
+                // Fall back to bar chart if type is unrecognized
+                if (!this.ALL_CHARTS.includes(spec.type)) {
                     spec.type = "bar";
                 }
                 const ctx = canvas.getContext("2d")!;
@@ -2015,7 +1638,7 @@ export class PBIChat implements IVisual {
                         base.pointHoverBorderColor = ct.pointBorder;
                         base.pointHoverBorderWidth = 2;
                     } else {
-                        // Bar charts — gradient fill
+                        // Bar charts -- gradient fill
                         const fillGrad = this.createGradient(ctx, palette, !isHorizontal);
                         base.backgroundColor = fillGrad;
                         base.hoverBackgroundColor = palette.solid + "DD";
@@ -2151,6 +1774,31 @@ export class PBIChat implements IVisual {
         t = t.replace(/^\d+\.\s+(.+)$/gm, "<li>$1</li>");
         t = t.replace(/^### (.+)$/gm, '<strong class="dia-h3">$1</strong>');
         t = t.replace(/^## (.+)$/gm, '<strong class="dia-h2">$1</strong>');
+
+        // Markdown tables: detect consecutive lines starting with |
+        t = t.replace(/((?:^\|.+\|$\n?){2,})/gm, (_match, tableBlock: string) => {
+            const rows = tableBlock.trim().split("\n").filter((r: string) => r.trim());
+            if (rows.length < 2) return tableBlock;
+            let html = '<div class="dia-table-wrap"><table class="dia-table">';
+            for (let ri = 0; ri < rows.length; ri++) {
+                const row = rows[ri].trim();
+                // Skip separator row (|---|---|)
+                if (/^\|[\s\-:]+\|$/.test(row.replace(/\|/g, (m: string, offset: number, str: string) => {
+                    // Check if row is only pipes, dashes, colons, spaces
+                    return m;
+                })) && /^[\|\s\-:]+$/.test(row)) continue;
+                const cells = row.split("|").slice(1, -1); // remove leading/trailing empty from split
+                const tag = ri === 0 ? "th" : "td";
+                html += "<tr>";
+                for (const cell of cells) {
+                    html += `<${tag}>${cell.trim()}</${tag}>`;
+                }
+                html += "</tr>";
+            }
+            html += "</table></div>";
+            return html;
+        });
+
         t = t.replace(/\n/g, "<br>");
         t = t.replace(/<br><(ul|ol|pre)/g, "<$1");
         t = t.replace(/<\/(ul|ol|pre)><br>/g, "</$1>");
@@ -2188,10 +1836,10 @@ export class PBIChat implements IVisual {
                         result += lines[i];
                         pending.push(chartIdx);
                     } else if (betweenText === "") {
-                        // Consecutive chart — keep accumulating
+                        // Consecutive chart -- keep accumulating
                         pending.push(chartIdx);
                     } else {
-                        // Non-empty text breaks the run — flush pending
+                        // Non-empty text breaks the run -- flush pending
                         if (pending.length >= 2) {
                             for (let p = 0; p < pending.length; p += 2) {
                                 if (p + 1 < pending.length) {
@@ -2212,7 +1860,7 @@ export class PBIChat implements IVisual {
             }
             t = result;
         } else if (chartHtmls.length === 1) {
-            // Single chart — just inline it
+            // Single chart -- just inline it
             t = t.replace(CHART_PLACEHOLDER, chartHtmls[0]);
         }
 

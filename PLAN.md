@@ -36,7 +36,7 @@ Prepare the "Data Insights Assistant" Power BI visual for publication on Microso
 
 - [x] **3.1** Removed hardcoded "Safari99" — password now set via `SETTINGS_PASSWORD` env var, validated against backend
 - [x] **3.2** HTTPS enforcement — visual shows warning when backend URL is HTTP and not localhost/127.0.0.1
-- [x] **3.3** Auth via `X-Auth-Password` header on all protected endpoints using `Depends(require_auth)` with timing-safe comparison (`secrets.compare_digest`)
+- [x] **3.3** Settings protected by `SETTINGS_PASSWORD` env var with timing-safe comparison (`secrets.compare_digest`)
 - [x] **3.4** Investigated AAD Authentication API — requires Power BI premium capacity and Azure AD app registration; deferred to post-launch (Phase 10)
 - [x] **3.5** Rate limiting — sliding-window per-IP limiter (`RATE_LIMIT_RPM` env var, default 60/min) on `/chat` and `/verify-password`
 - [x] **3.6** SQL injection prevention — `_BLOCKED_SQL` regex blocks destructive operations (DROP, ALTER, DELETE, UPDATE, INSERT, CREATE, TRUNCATE, GRANT, REVOKE, EXEC, MERGE); only read-only queries allowed
@@ -62,22 +62,14 @@ Prepare the "Data Insights Assistant" Power BI visual for publication on Microso
 ## Phase 5: Freemium / Licensing Infrastructure
 
 - [x] **5.1** Designed free vs. paid feature split — Free: 5 queries/day, 1 connection, bar/line/pie charts; Pro: unlimited queries, unlimited connections, all 6 chart types
-- [x] **5.2** Query counting via Supabase `usage_log` table — per license key (Pro) or per IP (Free), counted daily
-- [x] **5.3** License validation via Supabase `licenses` table — `pbi-{uuid4}` keys with tier, expiry, active/revoked status; `resolve_license()` + `resolve_license_dep` FastAPI dependency
+- [x] **5.2** Query counting — per IP, counted daily
+- [x] **5.3** License validation via Microsoft Licensing API (client-side)
 - [x] **5.4** License status indicator — tier badge in bottom bar ("FREE (3/5)" yellow / "PRO" green), `GET /license` endpoint for status check
 - [x] **5.5** Upgrade prompt — styled banner with lock icon when daily limit reached, directs user to enter Pro key in Settings
 - [x] **5.6** Decided on pricing — $15/user/month for Pro tier
 - [x] **5.7** Set up payment processing — Stripe Checkout with monthly recurring subscriptions
 - [ ] **5.8** Create a pricing page on your website (business decision)
-- [x] **5.9** User account system — Supabase Auth (email/password signup + login), JWT validation, user profile endpoint
-- [x] **5.10** User-linked license keys — signup auto-generates `pbi-{uuid}` key linked to user row, replaces anonymous model
-- [x] **5.11** Stripe billing endpoints — `POST /billing/create-checkout-session`, `POST /billing/webhook` (5 event handlers), `POST /billing/cancel-subscription`
-- [x] **5.12** Database schema — `users`, `subscriptions`, `payments` tables with RLS policies; `usage_log` extended with `user_id` FK
-- [x] **5.13** Visual auth overlay — tabbed Login/Sign Up form with "Continue without account" skip
-- [x] **5.14** Visual user profile — Account section in settings with email, tier badge, Upgrade/Cancel/Logout buttons
-- [x] **5.15** Stripe upgrade flow — opens Checkout via `host.launchUrl()`, polls `/auth/me` for tier change
-- [x] **5.16** Session persistence — JWT tokens stored in localStorage, auto-refresh on 401
-- [x] **5.17** Backward compatibility — old standalone license keys still work via fallback in `resolve_license`
+- ~~**5.9-5.17**~~ Removed — Supabase auth, Stripe billing, and user account system replaced by password-protected settings + local config files
 
 ## Phase 6: Legal & Compliance Documents
 

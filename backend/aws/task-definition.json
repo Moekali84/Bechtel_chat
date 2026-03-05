@@ -1,0 +1,50 @@
+{
+  "family": "bechtel-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::736744502425:role/pbichat-ecs-execution-role",
+  "containerDefinitions": [
+    {
+      "name": "bechtel-backend",
+      "image": "736744502425.dkr.ecr.us-east-1.amazonaws.com/bechtel-backend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "AZURE_OPENAI_ENDPOINT",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:736744502425:secret:bechtel/backend-env-XhngmI:AZURE_OPENAI_ENDPOINT::"
+        },
+        {
+          "name": "AZURE_OPENAI_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:736744502425:secret:bechtel/backend-env-XhngmI:AZURE_OPENAI_API_KEY::"
+        },
+        {
+          "name": "LLM_MODEL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:736744502425:secret:bechtel/backend-env-XhngmI:LLM_MODEL::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bechtel-backend",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
