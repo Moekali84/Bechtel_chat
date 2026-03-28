@@ -35,6 +35,37 @@
     --warn: #facc15;
     --primary: #60a5fa;
 
+    .dia-logo {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 14px 0 8px;
+    }
+
+    .dia-logo img {
+        max-height: 200px;
+        max-width: 1200px;
+        object-fit: contain;
+        filter: drop-shadow(0 0 6px rgba(0, 0, 0, 0.35));
+    }
+
+    .dia-logo-tagline {
+        font-size: 10px;
+        color: var(--txm);
+        text-align: center;
+        margin-top: 4px;
+        line-height: 1.4;
+        letter-spacing: 0.3px;
+    }
+
+    .dia-support-line {
+        display: inline-block;
+        margin-top: 4px;
+        font-size: 9px;
+        color: var(--txm);
+        opacity: 0.75;
+    }
+
     // ── Light theme ──
     &.dia-light {
         --bg: #f8f7f4;
@@ -108,7 +139,7 @@
 }
 
 .dia-msgs {
-    max-width: 720px;
+    max-width: 900px;
     width: 100%;
     margin: 0 auto;
     padding: 0 20px;
@@ -123,8 +154,8 @@
     align-items: center;
     justify-content: center;
     flex: 1;
-    min-height: 50vh;
-    padding: 40px 20px 30px;
+    min-height: 40vh;
+    padding: 20px 20px 30px;
 
     h1 {
         font-size: 22px;
@@ -357,6 +388,42 @@
     margin: 8px 0;
 }
 
+// ── Mode toggle ──
+.dia-mode-toggle {
+    display: flex;
+    gap: 4px;
+    max-width: 900px;
+    margin: 0 auto 8px;
+    padding: 3px;
+    background: var(--bg2);
+    border-radius: 8px;
+    border: 1px solid var(--bd);
+}
+
+.dia-mode-btn {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--tx2);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover {
+        color: var(--tx);
+        background: var(--bg3);
+    }
+
+    &.active {
+        color: var(--tx);
+        background: var(--bg3);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    }
+}
+
 // ── Input area ──
 .dia-input-wrap {
     padding: 0 20px 16px;
@@ -364,7 +431,7 @@
 }
 
 .dia-input-container {
-    max-width: 720px;
+    max-width: 900px;
     margin: 0 auto;
 }
 
@@ -547,6 +614,21 @@
     letter-spacing: .6px;
     padding-bottom: 4px;
     border-bottom: 1px solid var(--bd);
+
+    &.dia-collapsible {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        user-select: none;
+
+        &:hover { color: var(--tx); }
+    }
+}
+
+.dia-collapse-icon {
+    font-size: 12px;
+    transition: transform 0.15s ease;
 }
 
 .dia-field {
@@ -585,6 +667,18 @@
         color: var(--txm);
         margin-top: 4px;
         line-height: 1.4;
+    }
+}
+
+.dia-preset-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+
+    .dia-test-btn {
+        flex: 1;
+        font-size: 11px;
+        padding: 6px 10px;
     }
 }
 
@@ -765,6 +859,74 @@
     &.ok { display: block; background: rgba(74,222,128,.1); color: var(--grn); border: 1px solid rgba(74,222,128,.2); }
     &.fail { display: block; background: rgba(248,113,113,.1); color: var(--red); border: 1px solid rgba(248,113,113,.2); }
     &.warn { display: block; background: rgba(250,204,21,.1); color: var(--warn); border: 1px solid rgba(250,204,21,.2); }
+}
+
+.dia-settings-subsection {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--txm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.dia-tmdl-projects-list {
+    max-height: 200px;
+    overflow-y: auto;
+
+    &::-webkit-scrollbar { width: 5px; }
+    &::-webkit-scrollbar-track { background: transparent; }
+    &::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+}
+
+.dia-tmdl-project-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    margin-bottom: 4px;
+    background: var(--chart-inner);
+    border: 1px solid var(--bd);
+    border-radius: 6px;
+    font-size: 11px;
+
+    &.active {
+        border-color: rgba(74, 222, 128, 0.3);
+        background: rgba(74, 222, 128, 0.05);
+    }
+}
+
+.dia-tmdl-project-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.dia-tmdl-project-name {
+    color: var(--tx);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dia-tmdl-project-size {
+    color: var(--txm);
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.dia-tmdl-project-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.dia-btn-sm {
+    padding: 3px 8px !important;
+    font-size: 10px !important;
+    min-height: auto !important;
 }
 
 // ── Connection cards ──
@@ -1170,4 +1332,50 @@
     }
 }
 
+// ── Mobile responsiveness ──
+@media (max-width: 600px) {
+    .dia-msgs {
+        padding: 0 10px;
+    }
 
+    .dia-logo img {
+        max-height: 120px;
+        max-width: 90%;
+    }
+
+    .dia-logo-tagline {
+        font-size: 9px;
+    }
+
+    .dia-input-box {
+        font-size: 14px;
+    }
+
+    .dia-settings {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .dia-setup-banner {
+        max-width: 100%;
+        padding: 16px;
+    }
+
+    .dia-setup-buttons {
+        grid-template-columns: 1fr;
+    }
+
+    .dia-msg {
+        max-width: 95%;
+    }
+}
+
+@media (max-width: 400px) {
+    .dia-logo img {
+        max-height: 80px;
+    }
+
+    .dia-bottom-btns {
+        flex-wrap: wrap;
+    }
+}

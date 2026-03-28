@@ -178,7 +178,7 @@ npm run package
 | **ECS Service** | `pbichat-backend` (auto-scaling: 2-10 tasks) |
 | **Task Definition** | 1024 CPU, 2048 MB |
 | **ALB** | `pbichat-alb` with HTTPS (ACM certificate) |
-| **Domain** | `api.gnosi.io` (Route 53 → ALB) |
+| **Domain** | Custom (configure in visual settings) |
 | **Secrets** | AWS Secrets Manager (`pbichat/backend-env`) |
 | **CI/CD** | CodeBuild → ECR → ECS |
 | **Logs** | CloudWatch (`/ecs/pbichat-backend`) |

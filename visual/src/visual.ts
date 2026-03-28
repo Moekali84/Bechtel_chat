@@ -23,7 +23,7 @@ class PBIChatFormattingSettings extends formattingSettings.Model {
 export class PBIChat implements IVisual {
     private host: IVisualHost;
     private container: HTMLElement;
-    private _backendUrl: string = "https://bechtel.gnosi.io";
+    private _backendUrl: string = "http://localhost:8000";
     private history: HistoryMsg[] = [];
     private fmtSettings = new PBIChatFormattingSettings();
     private fmtService: FormattingSettingsService;
@@ -38,6 +38,7 @@ export class PBIChat implements IVisual {
         id: string; name: string; type: string;
         host?: string; http_path?: string; token?: string; catalog_schema?: string;
         server?: string; database?: string; username?: string; password?: string;
+        _tokenSaved?: boolean; _passwordSaved?: boolean;
     }> = [];
 
     // Warehouse status tracking
@@ -46,6 +47,13 @@ export class PBIChat implements IVisual {
 
     // All available chart types
     private readonly ALL_CHARTS: string[] = ["bar", "line", "pie", "doughnut", "scatter", "horizontalBar"];
+
+    // Data mode: "auto" picks based on available data, "inline" forces inline, "database" forces database
+    private dataMode: "auto" | "inline" | "database" = "auto";
+
+    // Per-report TMDL project ID
+    private currentReportId: string = "";
+    private tmdlProjects: Array<{ report_id: string; name: string; size_kb: number }> = [];
 
     // Inline data mode (columns dropped into field well)
     private inlineDataCsv: string = "";
@@ -79,8 +87,10 @@ export class PBIChat implements IVisual {
         <div class="dia-root">
             <div class="dia-chat" id="dia-chat">
                 <div class="dia-msgs" id="dia-msgs">
+            <div class="dia-logo" id="dia-logo">
+                <div class="dia-logo-tagline">Bechtel AI Powered Technologies<br/>NS&amp;E PIIM Team<br/><span class="dia-support-line">Support : Moe Al Khalili ; Malkhalili@bechtel.com</span></div>
+            </div>
                     <div class="dia-welcome" id="dia-welcome">
-                        <p class="dia-welcome-sub">AI-powered data assistant with live SQL access</p>
                         <div class="dia-setup-banner" id="dia-setup-banner">
                             <div class="dia-setup-title">Get Started</div>
                             <div class="dia-setup-steps">
@@ -94,12 +104,17 @@ export class PBIChat implements IVisual {
                             <button class="dia-sug" data-q="What tables are in my database?">What tables are in my database?</button>
                             <button class="dia-sug" data-q="Show me a summary of the data">Show me a summary of the data</button>
                             <button class="dia-sug" data-q="Write a DAX measure for this metric">Write a DAX measure for this metric</button>
-                            <button class="dia-sug" data-q="What trends or anomalies exist?">What trends or anomalies exist?</button>
+                            <button class="dia-sug" data-q="Show me the latest incidents for NS&amp;E projects for the last 7 days">Show me the latest incidents for NS&amp;E projects for the last 7 days</button>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="dia-input-wrap">
+                <div class="dia-mode-toggle" id="dia-mode-toggle">
+                    <button class="dia-mode-btn active" data-mode="auto">Auto</button>
+                    <button class="dia-mode-btn" data-mode="inline">Inline Data</button>
+                    <button class="dia-mode-btn" data-mode="database">Database</button>
+                </div>
                 <div class="dia-input-container">
                     <div class="dia-input-box">
                         <textarea id="dia-input" placeholder="Ask anything about your data..." rows="1"></textarea>
@@ -141,16 +156,59 @@ export class PBIChat implements IVisual {
                     <div class="dia-field">
                         <label>Backend URL</label>
                         <select id="dia-backend-url-select" class="dia-select">
-                            <option value="https://bechtel.gnosi.io">Production (bechtel.gnosi.io)</option>
                             <option value="http://localhost:8000">Local (localhost:8000)</option>
+                            <option value="custom">Custom URL...</option>
                         </select>
+                        <input type="text" id="dia-backend-url-custom" class="dia-input" placeholder="https://your-server.com" style="display:none; margin-top:6px;" />
                     </div>
 
-                    <div class="dia-settings-section">Data Connections</div>
-                    <div id="dia-conn-list"></div>
-                    <button class="dia-test-btn" id="dia-add-conn-btn">+ Add Connection</button>
+                    <div class="dia-settings-section">AI API Configuration</div>
+                    <div class="dia-field">
+                        <label>LLM Preset</label>
+                        <select id="dia-llm-preset-select" class="dia-select">
+                            <option value="default">Default (Azure OpenAI)</option>
+                        </select>
+                        <div class="dia-preset-actions">
+                            <button class="dia-test-btn" id="dia-save-preset-btn">Save as New</button>
+                            <button class="dia-test-btn dia-btn-danger" id="dia-delete-preset-btn" style="display:none">Delete</button>
+                        </div>
+                    </div>
+                    <div class="dia-field">
+                        <label>Preset Name</label>
+                        <input type="text" id="dia-preset-name" placeholder="My Custom LLM" class="dia-input"/>
+                        <div class="dia-hint">Name for the new preset when saving.</div>
+                    </div>
+                    <div class="dia-field">
+                        <label>API Endpoint</label>
+                        <input type="text" id="dia-api-endpoint" placeholder="https://api.openrouter.com/v1/chat/completions" class="dia-input"/>
+                        <div class="dia-hint">Leave empty to use default Azure OpenAI. Enter any OpenRouter API URL (e.g. https://api.openrouter.com/v1/chat/completions or https://openrouter.ai/api/v1/chat/completions).</div>
+                    </div>
+                    <div class="dia-field">
+                        <label>API Key</label>
+                        <input type="password" id="dia-api-key" placeholder="sk-or-v1-..." class="dia-input"/>
+                        <div class="dia-hint">Your API key for the configured endpoint. Leave empty to use default.</div>
+                    </div>
+                    <div class="dia-field">
+                        <label>LLM Model</label>
+                        <input type="text" id="dia-llm-model" placeholder="gpt-4o-mini" class="dia-input"/>
+                        <div class="dia-hint">Model name (e.g., gpt-4o-mini, anthropic/claude-3-haiku). Leave empty for default.</div>
+                    </div>
+
+                    <div class="dia-settings-section dia-collapsible" id="dia-conn-header">
+                        <span>Data Connections</span>
+                        <span class="dia-collapse-icon" id="dia-conn-collapse-icon">▾</span>
+                    </div>
+                    <div id="dia-conn-body">
+                        <div id="dia-conn-list"></div>
+                        <button class="dia-test-btn" id="dia-add-conn-btn">+ Add Connection</button>
+                    </div>
 
                     <div class="dia-settings-section">Semantic Model (.tmdl Files)</div>
+                    <div class="dia-field">
+                        <label>Project Name</label>
+                        <input type="text" id="dia-tmdl-project-name" placeholder="e.g. sales-report, finance-dashboard" class="dia-input"/>
+                        <div class="dia-hint">A unique name to identify this TMDL project. Used to store and retrieve the semantic model per report.</div>
+                    </div>
                     <div class="dia-tmdl-actions">
                         <button class="dia-test-btn" id="dia-add-tmdl-btn">Select Folder</button>
                         <button class="dia-test-btn dia-btn-muted" id="dia-tmdl-clear-btn" style="display:none">Clear</button>
@@ -159,6 +217,9 @@ export class PBIChat implements IVisual {
                     <div class="dia-hint">Select the semantic model folder. All .tmdl files inside it (including subfolders) will be imported automatically.</div>
                     <div class="dia-tmdl-file-list" id="dia-tmdl-file-list" style="display:none"></div>
                     <div class="dia-test-result" id="dia-tmdl-result"></div>
+
+                    <div class="dia-settings-subsection" style="margin-top:12px">Stored TMDL Projects</div>
+                    <div id="dia-tmdl-projects-list" class="dia-tmdl-projects-list"></div>
 
                     <div class="dia-settings-section">Additional Context</div>
                     <div class="dia-field">
@@ -312,6 +373,16 @@ export class PBIChat implements IVisual {
             });
         });
 
+        // Mode toggle buttons
+        this.container.querySelectorAll(".dia-mode-btn").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                const mode = (e.target as HTMLElement).getAttribute("data-mode") as "auto" | "inline" | "database";
+                this.dataMode = mode;
+                this.container.querySelectorAll(".dia-mode-btn").forEach(b => b.classList.remove("active"));
+                (e.target as HTMLElement).classList.add("active");
+            });
+        });
+
         // Settings button
         this.container.querySelector("#dia-settings-btn")!.addEventListener("click", () => this.openSettings());
 
@@ -336,7 +407,25 @@ export class PBIChat implements IVisual {
         this.container.querySelector("#dia-settings-close")!.addEventListener("click", () => this.closeSettings());
         this.container.querySelector("#dia-settings-overlay")!.addEventListener("click", () => this.closeSettings());
         (this.container.querySelector("#dia-backend-url-select") as HTMLSelectElement).addEventListener("change", (e) => {
-            this._backendUrl = (e.target as HTMLSelectElement).value;
+            const val = (e.target as HTMLSelectElement).value;
+            const customInput = this.container.querySelector("#dia-backend-url-custom") as HTMLInputElement;
+            if (val === "custom") {
+                customInput.style.display = "block";
+                if (customInput.value) this._backendUrl = customInput.value;
+            } else {
+                customInput.style.display = "none";
+                this._backendUrl = val;
+            }
+        });
+        (this.container.querySelector("#dia-backend-url-custom") as HTMLInputElement).addEventListener("input", (e) => {
+            this._backendUrl = (e.target as HTMLInputElement).value;
+        });
+        this.container.querySelector("#dia-conn-header")!.addEventListener("click", () => {
+            const body = this.container.querySelector("#dia-conn-body") as HTMLElement;
+            const icon = this.container.querySelector("#dia-conn-collapse-icon") as HTMLElement;
+            const collapsed = body.style.display === "none";
+            body.style.display = collapsed ? "" : "none";
+            icon.textContent = collapsed ? "▾" : "▸";
         });
         this.container.querySelector("#dia-add-conn-btn")!.addEventListener("click", () => this.addConnection());
         this.container.querySelector("#dia-add-tmdl-btn")!.addEventListener("click", () => {
@@ -345,6 +434,11 @@ export class PBIChat implements IVisual {
         (this.container.querySelector("#dia-tmdl-file-input") as HTMLInputElement).addEventListener("change", (e) => this.addTmdlFiles(e));
         this.container.querySelector("#dia-tmdl-clear-btn")!.addEventListener("click", () => this.clearTmdlFiles());
         this.container.querySelector("#dia-apply-btn")!.addEventListener("click", () => this.applySettings());
+
+        // LLM Preset event listeners
+        (this.container.querySelector("#dia-llm-preset-select") as HTMLSelectElement).addEventListener("change", () => this.selectLLMPreset());
+        this.container.querySelector("#dia-save-preset-btn")!.addEventListener("click", () => this.saveLLMPreset());
+        this.container.querySelector("#dia-delete-preset-btn")!.addEventListener("click", () => this.deleteLLMPreset());
 
         // Global keyboard handler -- Escape closes overlays
         this.container.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -413,7 +507,18 @@ export class PBIChat implements IVisual {
 
         // Sync backend URL dropdown with current value
         const urlSelect = this.container.querySelector("#dia-backend-url-select") as HTMLSelectElement;
-        if (urlSelect) urlSelect.value = this._backendUrl;
+        const customInput = this.container.querySelector("#dia-backend-url-custom") as HTMLInputElement;
+        if (urlSelect) {
+            // Check if current URL matches a preset option
+            const isPreset = Array.from(urlSelect.options).some(o => o.value !== "custom" && o.value === this._backendUrl);
+            if (isPreset) {
+                urlSelect.value = this._backendUrl;
+                if (customInput) customInput.style.display = "none";
+            } else {
+                urlSelect.value = "custom";
+                if (customInput) { customInput.style.display = "block"; customInput.value = this._backendUrl; }
+            }
+        }
 
         this.updateApplyButton();
 
@@ -435,34 +540,206 @@ export class PBIChat implements IVisual {
             };
 
             setVal("#dia-s-extra", cfg.extra_context);
+            // Don't set individual API fields here - they'll be set by loadLLMPresets based on current preset
+            // setVal("#dia-api-endpoint", cfg.api_endpoint || "");
+            // setVal("#dia-api-key", ""); // Don't populate API key for security
+            // setVal("#dia-llm-model", cfg.llm_model || "");
 
-            // Show TMDL load status if model is loaded
-            if (cfg.semantic_model_loaded) {
+            // Load LLM presets - this will populate the form fields
+            this.loadLLMPresets(cfg.llm_presets || {}, cfg.current_llm_preset || "default", cfg);
+
+            // Load TMDL projects list
+            this.tmdlProjects = cfg.tmdl_projects || [];
+            this.renderTmdlProjects();
+
+            // Show TMDL load status if model is loaded and a project is selected
+            if (cfg.semantic_model_loaded && this.currentReportId) {
                 this.tmdlLoaded = true;
                 const tmdlResult = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
                 if (tmdlResult) {
                     tmdlResult.className = "dia-test-result ok";
                     tmdlResult.style.display = "block";
-                    tmdlResult.textContent = `TMDL loaded (${(cfg.semantic_model_chars / 1024).toFixed(1)} KB)`;
+                    tmdlResult.textContent = `TMDL loaded: "${this.currentReportId}" (${(cfg.semantic_model_chars / 1024).toFixed(1)} KB)`;
                 }
+            } else if (this.tmdlProjects.length > 0 && !this.currentReportId) {
+                // Auto-select the first project if none is selected
+                this.selectTmdlProject(this.tmdlProjects[0].report_id);
             }
+
+            // Sync project name input
+            const nameInput = this.container.querySelector("#dia-tmdl-project-name") as HTMLInputElement;
+            if (nameInput && this.currentReportId) nameInput.value = this.currentReportId;
 
             this.extraContext = cfg.extra_context || "";
 
-            // Load connections
-            try {
-                const connResp = await fetch(`${this.backendUrl}/connections`);
-                if (connResp.ok) {
-                    const connData = await connResp.json();
-                    this.connections = connData.connections || [];
-                }
-            } catch (_) { /* connections endpoint not available */ }
+            // Load connections only on first load (avoid overwriting user-entered secrets with redacted values)
+            if (this.connections.length === 0) {
+                try {
+                    const connResp = await fetch(`${this.backendUrl}/connections`);
+                    if (connResp.ok) {
+                        const connData = await connResp.json();
+                        this.connections = (connData.connections || []).map((c: any) => {
+                            // Mark which secrets are saved on the backend (redacted = saved)
+                            if (c.token && c.token.endsWith("...")) { c._tokenSaved = true; c.token = ""; }
+                            if (c.password === "***") { c._passwordSaved = true; c.password = ""; }
+                            return c;
+                        });
+                    }
+                } catch (_) { /* connections endpoint not available */ }
+            }
 
             this.renderConnectionList();
             this.updateApplyButton();
         } catch (e) {
             // Backend unreachable -- fields stay empty
         }
+    }
+
+    private loadLLMPresets(presets: any, currentPreset: string, fallbackConfig?: any): void {
+        const select = this.container.querySelector("#dia-llm-preset-select") as HTMLSelectElement;
+        if (!select) return;
+
+        // Clear existing options except the first one
+        select.innerHTML = '<option value="default">Default (Azure OpenAI)</option>';
+
+        // Add custom presets
+        for (const [id, preset] of Object.entries(presets)) {
+            if (id !== "default") {
+                const option = document.createElement("option");
+                option.value = id;
+                option.textContent = (preset as any).name || id;
+                select.appendChild(option);
+            }
+        }
+
+        // Set current selection
+        select.value = currentPreset;
+
+        // Update form fields based on selected preset
+        this.updateFormFromPreset(currentPreset, presets, fallbackConfig);
+
+        // Show/hide delete button
+        const deleteBtn = this.container.querySelector("#dia-delete-preset-btn") as HTMLButtonElement;
+        if (deleteBtn) {
+            deleteBtn.style.display = currentPreset === "default" ? "none" : "inline-block";
+        }
+    }
+
+    private updateFormFromPreset(presetId: string, presets: any, fallbackConfig?: any): void {
+        const preset = presets[presetId];
+        
+        const setVal = (id: string, val: string) => {
+            const el = this.container.querySelector(id) as HTMLInputElement;
+            if (el) el.value = val || "";
+        };
+
+        if (preset) {
+            // Use preset values
+            setVal("#dia-api-endpoint", preset.api_endpoint || "");
+            setVal("#dia-api-key", ""); // Don't populate API key for security
+            setVal("#dia-llm-model", preset.llm_model || "");
+        } else if (fallbackConfig) {
+            // Use fallback individual config values
+            setVal("#dia-api-endpoint", fallbackConfig.api_endpoint || "");
+            setVal("#dia-api-key", ""); // Don't populate API key for security
+            setVal("#dia-llm-model", fallbackConfig.llm_model || "");
+        }
+    }
+
+    private async saveLLMPreset(): Promise<void> {
+        const presetName = (this.container.querySelector("#dia-preset-name") as HTMLInputElement).value.trim();
+        if (!presetName) {
+            alert("Please enter a preset name");
+            return;
+        }
+
+        const apiEndpoint = (this.container.querySelector("#dia-api-endpoint") as HTMLInputElement).value.trim();
+        const apiKey = (this.container.querySelector("#dia-api-key") as HTMLInputElement).value.trim();
+        const llmModel = (this.container.querySelector("#dia-llm-model") as HTMLInputElement).value.trim();
+
+        // Generate a unique ID
+        const presetId = `preset_${Date.now()}`;
+
+        try {
+            const resp = await fetch(`${this.backendUrl}/llm-presets`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    preset_id: presetId,
+                    preset: {
+                        name: presetName,
+                        api_endpoint: apiEndpoint,
+                        api_key: apiKey,
+                        llm_model: llmModel
+                    }
+                }),
+            });
+
+            if (resp.ok) {
+                // Automatically select the newly created preset
+                await this.selectPresetById(presetId);
+                // Clear the preset name field
+                (this.container.querySelector("#dia-preset-name") as HTMLInputElement).value = "";
+                alert(`Preset "${presetName}" saved successfully!`);
+            } else {
+                alert("Failed to save preset");
+            }
+        } catch (e) {
+            console.error("Error saving preset:", e);
+            alert("Error saving preset");
+        }
+    }
+
+    private async deleteLLMPreset(): Promise<void> {
+        const select = this.container.querySelector("#dia-llm-preset-select") as HTMLSelectElement;
+        const presetId = select.value;
+
+        if (presetId === "default") {
+            alert("Cannot delete the default preset");
+            return;
+        }
+
+        if (!confirm("Are you sure you want to delete this preset?")) {
+            return;
+        }
+
+        try {
+            const resp = await fetch(`${this.backendUrl}/llm-presets/${presetId}`, {
+                method: "DELETE",
+            });
+
+            if (resp.ok) {
+                // Reload config to refresh presets
+                await this.loadConfigFromBackend();
+                alert("Preset deleted successfully!");
+            } else {
+                alert("Failed to delete preset");
+            }
+        } catch (e) {
+            console.error("Error deleting preset:", e);
+            alert("Error deleting preset");
+        }
+    }
+
+    private async selectPresetById(presetId: string): Promise<void> {
+        try {
+            const resp = await fetch(`${this.backendUrl}/llm-presets/${presetId}/select`, {
+                method: "POST",
+            });
+
+            if (resp.ok) {
+                // Reload config to refresh UI with the selected preset
+                await this.loadConfigFromBackend();
+            }
+        } catch (e) {
+            console.error("Error selecting preset:", e);
+        }
+    }
+
+    private async selectLLMPreset(): Promise<void> {
+        const select = this.container.querySelector("#dia-llm-preset-select") as HTMLSelectElement;
+        const presetId = select.value;
+        await this.selectPresetById(presetId);
     }
 
     private closeSettings(): void {
@@ -564,7 +841,7 @@ export class PBIChat implements IVisual {
                 </div>
                 <div class="dia-field">
                     <label>Access Token</label>
-                    <input type="password" class="dia-conn-f" data-idx="${idx}" data-field="token" value="${this.escapeHtml(conn.token || "")}" placeholder="dapi..."/>
+                    <input type="password" class="dia-conn-f" data-idx="${idx}" data-field="token" value="${this.escapeHtml(conn.token || "")}" placeholder="${conn._tokenSaved ? "••• saved (leave empty to keep)" : "dapi..."}"/>
                 </div>
                 <div class="dia-field">
                     <label>Default Catalog.Schema</label>
@@ -585,7 +862,7 @@ export class PBIChat implements IVisual {
                 </div>
                 <div class="dia-field">
                     <label>Password</label>
-                    <input type="password" class="dia-conn-f" data-idx="${idx}" data-field="password" value="${this.escapeHtml(conn.password || "")}" placeholder="..."/>
+                    <input type="password" class="dia-conn-f" data-idx="${idx}" data-field="password" value="${this.escapeHtml(conn.password || "")}" placeholder="${conn._passwordSaved ? "••• saved (leave empty to keep)" : "..."}"/>
                 </div>
             `;
 
@@ -662,7 +939,23 @@ export class PBIChat implements IVisual {
             const i = parseInt(el.dataset.idx || "0");
             const field = el.dataset.field || "";
             if (this.connections[i] && field) {
-                (this.connections[i] as any)[field] = el.value.trim();
+                const val = el.value.trim();
+                // For secret fields: only overwrite if user actually typed a new value
+                if (field === "token") {
+                    if (val) {
+                        // User entered a new token — use it and clear the saved flag
+                        (this.connections[i] as any).token = val;
+                        (this.connections[i] as any)._tokenSaved = false;
+                    }
+                    // If empty, leave token and _tokenSaved as-is (backend will use __KEEP__)
+                } else if (field === "password") {
+                    if (val) {
+                        (this.connections[i] as any).password = val;
+                        (this.connections[i] as any)._passwordSaved = false;
+                    }
+                } else {
+                    (this.connections[i] as any)[field] = val;
+                }
             }
         });
     }
@@ -719,8 +1012,8 @@ export class PBIChat implements IVisual {
             const file = files[i];
             if (!file.name.toLowerCase().endsWith(".tmdl")) continue;
             const text = await file.text();
-            // Use the filename (not the full path) as the identifier
-            const name = file.name;
+            // Use the relative path to preserve subfolder structure and avoid dedup collisions
+            const name = (file as any).webkitRelativePath || file.name;
             // Dedup by name -- last occurrence wins
             const idx = this.pendingTmdlFiles.findIndex(f => f.name === name);
             if (idx >= 0) {
@@ -768,6 +1061,17 @@ export class PBIChat implements IVisual {
 
         const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
 
+        // Read report_id from the project name input
+        const projectNameInput = this.container.querySelector("#dia-tmdl-project-name") as HTMLInputElement;
+        const reportId = (projectNameInput?.value || "").trim().replace(/[^a-zA-Z0-9_\-]/g, "-");
+
+        if (!reportId) {
+            resultEl.className = "dia-test-result fail";
+            resultEl.style.display = "block";
+            resultEl.textContent = "Enter a Project Name before uploading.";
+            return;
+        }
+
         resultEl.className = "dia-test-result";
         resultEl.style.display = "block";
         resultEl.textContent = `Uploading ${this.pendingTmdlFiles.length} file(s)...`;
@@ -780,7 +1084,7 @@ export class PBIChat implements IVisual {
         }
 
         try {
-            const payload: any = { files: this.pendingTmdlFiles };
+            const payload: any = { files: this.pendingTmdlFiles, report_id: reportId };
             // Save current connections alongside the model
             if (this.connections.length > 0) {
                 payload.connections = this.connections;
@@ -800,16 +1104,127 @@ export class PBIChat implements IVisual {
             const data = await resp.json();
             resultEl.className = "dia-test-result ok";
             const skipped = data.files_skipped ? ` (${data.files_skipped} auto-generated skipped)` : "";
-            const msg = `Uploaded ${data.files_loaded} .tmdl file(s) (${(data.total_chars / 1024).toFixed(1)} KB)${skipped}`;
+            const msg = `Uploaded ${data.files_loaded} .tmdl file(s) (${(data.total_chars / 1024).toFixed(1)} KB) as "${reportId}"${skipped}`;
             resultEl.textContent = msg;
+            this.currentReportId = reportId;
             this.pendingTmdlFiles = [];
             this.renderTmdlFileList();
             this.tmdlLoaded = true;
             this.updateApplyButton();
+            // Refresh projects list
+            this.loadTmdlProjects();
         } catch (err: any) {
             resultEl.className = "dia-test-result fail";
             resultEl.textContent = err.message || "Failed to upload TMDL files.";
             // Keep files staged so user can retry
+        }
+    }
+
+    private async loadTmdlProjects(): Promise<void> {
+        const listEl = this.container.querySelector("#dia-tmdl-projects-list") as HTMLElement;
+        if (!listEl || !this.backendUrl) return;
+
+        try {
+            const resp = await fetch(`${this.backendUrl}/tmdl-projects`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            this.tmdlProjects = data.projects || [];
+            this.renderTmdlProjects();
+        } catch (_) { /* silently fail */ }
+    }
+
+    private renderTmdlProjects(): void {
+        const listEl = this.container.querySelector("#dia-tmdl-projects-list") as HTMLElement;
+        if (!listEl) return;
+
+        if (this.tmdlProjects.length === 0) {
+            listEl.innerHTML = `<div class="dia-hint" style="margin-top:4px">No TMDL projects stored yet.</div>`;
+            return;
+        }
+
+        listEl.innerHTML = this.tmdlProjects.map(p => {
+            const isActive = p.report_id === this.currentReportId;
+            return `<div class="dia-tmdl-project-item${isActive ? " active" : ""}" data-rid="${p.report_id}">
+                <div class="dia-tmdl-project-info">
+                    <span class="dia-tmdl-project-name">${p.report_id}</span>
+                    <span class="dia-tmdl-project-size">${p.size_kb} KB</span>
+                </div>
+                <div class="dia-tmdl-project-actions">
+                    <button class="dia-test-btn dia-btn-sm dia-tmdl-select-btn" data-rid="${p.report_id}">${isActive ? "✓ Active" : "Select"}</button>
+                    <button class="dia-test-btn dia-btn-sm dia-btn-danger dia-tmdl-delete-btn" data-rid="${p.report_id}">Delete</button>
+                </div>
+            </div>`;
+        }).join("");
+
+        // Bind select buttons
+        listEl.querySelectorAll(".dia-tmdl-select-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const rid = (btn as HTMLElement).getAttribute("data-rid") || "";
+                this.selectTmdlProject(rid);
+            });
+        });
+
+        // Bind delete buttons
+        listEl.querySelectorAll(".dia-tmdl-delete-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const rid = (btn as HTMLElement).getAttribute("data-rid") || "";
+                this.deleteTmdlProject(rid);
+            });
+        });
+    }
+
+    private selectTmdlProject(reportId: string): void {
+        this.currentReportId = reportId;
+        this.tmdlLoaded = true;
+        // Update project name input
+        const nameInput = this.container.querySelector("#dia-tmdl-project-name") as HTMLInputElement;
+        if (nameInput) nameInput.value = reportId;
+        // Update result display
+        const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
+        if (resultEl) {
+            const project = this.tmdlProjects.find(p => p.report_id === reportId);
+            resultEl.className = "dia-test-result ok";
+            resultEl.style.display = "block";
+            resultEl.textContent = `TMDL loaded: "${reportId}" (${project?.size_kb || "?"} KB)`;
+        }
+        this.renderTmdlProjects();
+        this.updateApplyButton();
+    }
+
+    private async deleteTmdlProject(reportId: string): Promise<void> {
+        const confirmed = await this.showConfirm(
+            `Delete TMDL project "${reportId}"? This cannot be undone.`
+        );
+        if (!confirmed) return;
+
+        try {
+            const resp = await fetch(`${this.backendUrl}/tmdl-projects/${encodeURIComponent(reportId)}`, {
+                method: "DELETE",
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || `Error ${resp.status}`);
+            }
+            // If we deleted the active project, clear selection
+            if (this.currentReportId === reportId) {
+                this.currentReportId = "";
+                this.tmdlLoaded = false;
+                const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
+                if (resultEl) { resultEl.style.display = "none"; }
+                const nameInput = this.container.querySelector("#dia-tmdl-project-name") as HTMLInputElement;
+                if (nameInput) nameInput.value = "";
+            }
+            // Remove from local list and re-render
+            this.tmdlProjects = this.tmdlProjects.filter(p => p.report_id !== reportId);
+            this.renderTmdlProjects();
+            this.updateApplyButton();
+        } catch (err: any) {
+            const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
+            if (resultEl) {
+                resultEl.className = "dia-test-result fail";
+                resultEl.style.display = "block";
+                resultEl.textContent = err.message || "Failed to delete project.";
+            }
         }
     }
 
@@ -838,28 +1253,54 @@ export class PBIChat implements IVisual {
         const extra = (this.container.querySelector("#dia-s-extra") as HTMLTextAreaElement).value.trim();
         this.extraContext = extra;
 
+        const apiEndpoint = (this.container.querySelector("#dia-api-endpoint") as HTMLInputElement).value.trim();
+        const apiKey = (this.container.querySelector("#dia-api-key") as HTMLInputElement).value.trim();
+        const llmModel = (this.container.querySelector("#dia-llm-model") as HTMLInputElement).value.trim();
+
         // Upload pending TMDL files if any
         if (this.pendingTmdlFiles.length > 0) {
             applyBtn.textContent = "Uploading TMDL files...";
             await this.uploadTmdlFiles();
         }
 
-        // Save extra context via /config
+        // TMDL is required before saving connections or LLM config
+        if (!this.tmdlLoaded) {
+            applyBtn.textContent = prevText;
+            applyBtn.disabled = false;
+            this.showError("Please upload your semantic model (.tmdl files) first. The TMDL is required before configuring connections or AI settings.");
+            return;
+        }
+
+        // Save configuration via /config
         try {
             await fetch(`${this.backendUrl}/config`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ extra_context: extra }),
+                body: JSON.stringify({
+                    extra_context: extra,
+                    api_endpoint: apiEndpoint || null,
+                    api_key: apiKey || null,
+                    llm_model: llmModel || null
+                }),
             });
         } catch (_) { /* settings still applied locally */ }
 
         // Save connections via /connections
         this.readConnectionsFromUI();
         try {
+            // For empty secret fields that were previously saved, send sentinel so backend preserves originals
+            const connsToSend = this.connections.map((c: any) => {
+                const copy = { ...c };
+                if (!copy.token && copy._tokenSaved) copy.token = "__KEEP__";
+                if (!copy.password && copy._passwordSaved) copy.password = "__KEEP__";
+                delete copy._tokenSaved;
+                delete copy._passwordSaved;
+                return copy;
+            });
             await fetch(`${this.backendUrl}/connections`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ connections: this.connections }),
+                body: JSON.stringify({ connections: connsToSend }),
             });
         } catch (_) { /* silently fail */ }
 
@@ -1146,7 +1587,7 @@ export class PBIChat implements IVisual {
                 <button class="dia-sug" data-q="What tables are in my database?">What tables are in my database?</button>
                 <button class="dia-sug" data-q="Show me a summary of the data">Show me a summary of the data</button>
                 <button class="dia-sug" data-q="Write a DAX measure for this metric">Write a DAX measure for this metric</button>
-                <button class="dia-sug" data-q="What trends or anomalies exist?">What trends or anomalies exist?</button>
+                <button class="dia-sug" data-q="Show me the latest incidents for NS&amp;E projects for the last 7 days">Show me the latest incidents for NS&amp;E projects for the last 7 days</button>
             </div>`;
         this.msgsEl.appendChild(welcome);
         this.welcomeEl = welcome;
@@ -1172,12 +1613,19 @@ export class PBIChat implements IVisual {
             return;
         }
 
-        // Database mode: require TMDL to be loaded
-        if (!this.inlineDataCsv && !this.tmdlLoaded) {
-            this.showError(
-                "No data source configured. Either drag columns into the Columns field well, " +
-                "or open Settings to upload your semantic model (.tmdl files) and configure a database connection."
-            );
+        // Determine effective mode
+        const useInline = this.dataMode === "inline" || (this.dataMode === "auto" && !!this.inlineDataCsv);
+        const useDatabase = this.dataMode === "database" || (this.dataMode === "auto" && !this.inlineDataCsv);
+
+        // TMDL is required for all AI features
+        if (!this.tmdlLoaded) {
+            this.showError("Semantic model (.tmdl files) must be loaded before using AI features. Open Settings to upload your .tmdl files.");
+            return;
+        }
+
+        // Validate data source is available for chosen mode
+        if (useInline && !this.inlineDataCsv) {
+            this.showError("Inline Data mode selected but no columns are in the field well. Drag columns into the Columns field first.");
             return;
         }
 
@@ -1191,7 +1639,7 @@ export class PBIChat implements IVisual {
 
         try {
             // Skip warehouse check in inline data mode
-            if (!this.inlineDataCsv) {
+            if (!useInline) {
                 // Pre-check warehouse state -- show status banner while waiting
                 let warehouseReady = false;
                 try {
@@ -1217,8 +1665,9 @@ export class PBIChat implements IVisual {
                 message: text,
                 history: this.history.slice(-20),
                 extra_context: this.extraContext || null,
+                report_id: this.currentReportId || null,
             };
-            if (this.inlineDataCsv) {
+            if (useInline) {
                 payload.inline_data = this.inlineDataCsv;
                 payload.inline_stats = this.inlineStats;
             }

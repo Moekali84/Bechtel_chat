@@ -37,6 +37,25 @@
           "description": "UUID of the active semantic model (auto-managed)"
         }
       }
+    },
+    "apiSettings": {
+      "properties": {
+        "apiEndpoint": {
+          "type": { "text": true },
+          "displayName": "API Endpoint",
+          "description": "Custom API endpoint URL (e.g., OpenRouter)"
+        },
+        "apiKey": {
+          "type": { "text": true },
+          "displayName": "API Key",
+          "description": "API key for the custom endpoint"
+        },
+        "llmModel": {
+          "type": { "text": true },
+          "displayName": "LLM Model",
+          "description": "Model name for the API"
+        }
+      }
     }
   }
 }

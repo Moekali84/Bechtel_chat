@@ -8,7 +8,16 @@ import os
 import re
 import time
 import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(os.path.join(os.path.dirname(__file__) or ".", "backend.log"), mode="a"),
+    ],
+)
 import asyncio
+from datetime import datetime
 from collections import defaultdict, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,7 +74,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.2")
 # LOCAL FILE-BASED CONFIG (replaces Supabase)
 # ══════════════════════════════════════════════════════════
 CONFIG_PATH = Path(__file__).parent / "config.json"
-SEMANTIC_MODEL_PATH = Path(__file__).parent / "semantic_model.txt"
+SEMANTIC_MODEL_PATH = Path(__file__).parent / "semantic_model.txt"  # legacy fallback
+TMDL_DATA_DIR = Path(__file__).parent / "data"
 
 
 def _load_config() -> dict:
@@ -74,14 +84,36 @@ def _load_config() -> dict:
             return json.loads(CONFIG_PATH.read_text())
     except Exception:
         pass
-    return {"extra_context": "", "connections": [], "llm_model": ""}
+    return {
+        "extra_context": "",
+        "connections": [],
+        "llm_model": "",
+        "llm_presets": {
+            "default": {
+                "name": "Default (Azure OpenAI)",
+                "api_endpoint": "",
+                "api_key": "",
+                "llm_model": ""
+            }
+        },
+        "current_llm_preset": "default"
+    }
 
 
 def _save_config(config: dict) -> None:
     CONFIG_PATH.write_text(json.dumps(config, indent=2))
 
 
-def _load_semantic_model() -> str:
+def _load_semantic_model(report_id: str = "") -> str:
+    """Load TMDL content for a specific report_id, or fall back to legacy file."""
+    if report_id:
+        path = TMDL_DATA_DIR / report_id / "semantic_model.txt"
+        try:
+            if path.exists():
+                return path.read_text()
+        except Exception:
+            pass
+    # Fallback to legacy global file
     try:
         if SEMANTIC_MODEL_PATH.exists():
             return SEMANTIC_MODEL_PATH.read_text()
@@ -90,8 +122,54 @@ def _load_semantic_model() -> str:
     return ""
 
 
-def _save_semantic_model(content: str) -> None:
-    SEMANTIC_MODEL_PATH.write_text(content)
+def _save_semantic_model(content: str, report_id: str = "") -> None:
+    """Save TMDL content for a specific report_id."""
+    if report_id:
+        folder = TMDL_DATA_DIR / report_id
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "semantic_model.txt").write_text(content)
+    else:
+        SEMANTIC_MODEL_PATH.write_text(content)
+
+
+def _delete_tmdl_project(report_id: str) -> bool:
+    """Delete a TMDL project folder by report_id. Returns True if deleted."""
+    import shutil
+    folder = TMDL_DATA_DIR / report_id
+    if folder.exists() and folder.is_dir():
+        shutil.rmtree(folder)
+        return True
+    return False
+
+
+def _list_tmdl_projects() -> list[dict]:
+    """List all stored TMDL projects with metadata."""
+    projects = []
+    if not TMDL_DATA_DIR.exists():
+        return projects
+    for folder in sorted(TMDL_DATA_DIR.iterdir()):
+        if not folder.is_dir():
+            continue
+        model_file = folder / "semantic_model.txt"
+        if not model_file.exists():
+            continue
+        content = model_file.read_text()
+        # Extract a friendly name from the TMDL content (database name)
+        name = folder.name  # report_id as default
+        for line in content.split("\n"):
+            if line.startswith("=== ") and line.endswith(" ==="):
+                fname = line[4:-4].strip()
+                if fname.endswith("database.tmdl") or fname == "database.tmdl":
+                    # Next non-empty line often has the model name
+                    break
+        projects.append({
+            "report_id": folder.name,
+            "name": name,
+            "size_chars": len(content),
+            "size_kb": round(len(content) / 1024, 1),
+            "modified": model_file.stat().st_mtime,
+        })
+    return projects
 
 
 # All chart types — licensing is handled by the visual via Microsoft's Licensing API.
@@ -108,20 +186,58 @@ class UserContext:
     connections: dict[str, dict] = field(default_factory=dict)
     llm_model: str = ""            # empty = use global default
     semantic_model: str = ""       # loaded from semantic_model.txt
+    api_endpoint: str = ""         # custom API endpoint (e.g., OpenRouter)
+    api_key: str = ""              # custom API key
+    llm_presets: dict[str, dict] = field(default_factory=dict)
+    current_llm_preset: str = "default"
 
     @property
     def effective_llm_model(self) -> str:
+        # First check current preset, then fall back to individual settings, then global default
+        if self.current_llm_preset and self.current_llm_preset in self.llm_presets:
+            preset = self.llm_presets[self.current_llm_preset]
+            if preset.get("llm_model"):
+                return preset["llm_model"]
         return self.llm_model or LLM_MODEL
 
+    @property
+    def effective_api_endpoint(self) -> str:
+        # First check current preset, then fall back to individual settings, then global default
+        if self.current_llm_preset and self.current_llm_preset in self.llm_presets:
+            preset = self.llm_presets[self.current_llm_preset]
+            if preset.get("api_endpoint"):
+                return preset["api_endpoint"]
+        return self.api_endpoint or AZURE_OPENAI_ENDPOINT
 
-def get_user_context() -> UserContext:
+    @property
+    def effective_api_key(self) -> str:
+        # First check current preset, then fall back to individual settings, then global default
+        if self.current_llm_preset and self.current_llm_preset in self.llm_presets:
+            preset = self.llm_presets[self.current_llm_preset]
+            if preset.get("api_key"):
+                return preset["api_key"]
+        return self.api_key or AZURE_OPENAI_API_KEY
+
+
+def get_user_context(report_id: str = "") -> UserContext:
     """Load user context from local config files."""
     config = _load_config()
     ctx = UserContext(
         user_id="local",
         extra_context=config.get("extra_context", ""),
         llm_model=config.get("llm_model", ""),
-        semantic_model=_load_semantic_model(),
+        api_endpoint=config.get("api_endpoint", ""),
+        api_key=config.get("api_key", ""),
+        llm_presets=config.get("llm_presets", {
+            "default": {
+                "name": "Default (Azure OpenAI)",
+                "api_endpoint": "",
+                "api_key": "",
+                "llm_model": ""
+            }
+        }),
+        current_llm_preset=config.get("current_llm_preset", "default"),
+        semantic_model=_load_semantic_model(report_id),
     )
     for c in config.get("connections", []):
         cid = c.get("id")
@@ -291,6 +407,7 @@ class ChatRequest(BaseModel):
     extra_context: Optional[str] = None
     inline_data: Optional[str] = None   # CSV from Power BI field wells
     inline_stats: Optional[str] = None  # JSON summary stats from ALL rows
+    report_id: Optional[str] = None     # Report ID for per-report TMDL lookup
 
     @field_validator("inline_data")
     @classmethod
@@ -315,6 +432,22 @@ class ChatResponse(BaseModel):
 class ConfigUpdate(BaseModel):
     llm_model: Optional[str] = None
     extra_context: Optional[str] = None
+    api_endpoint: Optional[str] = None
+    api_key: Optional[str] = None
+    current_llm_preset: Optional[str] = None
+
+class LLMPreset(BaseModel):
+    name: str
+    api_endpoint: str = ""
+    api_key: str = ""
+    llm_model: str = ""
+
+class LLMPresetCreate(BaseModel):
+    preset_id: str
+    preset: LLMPreset
+
+class LLMPresetDelete(BaseModel):
+    preset_id: str
 
 class TmdlFile(BaseModel):
     name: str
@@ -323,6 +456,7 @@ class TmdlFile(BaseModel):
 class TmdlUploadRequest(BaseModel):
     files: list[TmdlFile]
     connections: Optional[list] = None  # Per-report connections saved alongside the model
+    report_id: Optional[str] = None     # Report ID for per-report storage
 
 class HealthResponse(BaseModel):
     status: str
@@ -756,7 +890,11 @@ def _slim_tmdl(raw: str, max_chars: int = 400_000) -> str:
 
 
 def build_system_prompt(ctx: UserContext, discovered_schema: str, allowed_charts: Optional[set] = None) -> str:
-    p = """You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+    today = datetime.now().strftime("%Y-%m-%d")
+    p = f"""You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is {today}. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
 
 ## #1 RULE -- DATA ONLY, ZERO OUTSIDE KNOWLEDGE (READ THIS FIRST)
 - You are a DATA QUERY TOOL. You are NOT an analyst, consultant, or advisor.
@@ -1010,8 +1148,12 @@ Before you send your response, review it sentence by sentence. Delete any senten
 
 def build_inline_system_prompt(ctx: UserContext, inline_data: str, inline_stats: str | None = None, allowed_charts: set | None = None) -> str:
     """System prompt for inline data mode -- analyze CSV + pre-computed stats, no SQL."""
+    today = datetime.now().strftime("%Y-%m-%d")
     charts = ", ".join(sorted(allowed_charts or ALL_CHART_TYPES))
-    p = '''You are "PBIChat" -- an AI data analyst. The user provided a dataset from Power BI.
+    p = f'''You are "PBIChat" -- an AI data analyst. The user provided a dataset from Power BI.
+
+## CURRENT DATE
+Today is {today}. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc.
 
 ## HOW TO USE THE DATA
 You have TWO data sources below:
@@ -1047,6 +1189,9 @@ Output a ```chart code block with JSON:
 Supported types: {charts}
 - Comparisons: bar/horizontalBar | Trends: line | Proportions: pie/doughnut | Correlation: scatter
 """
+    if ctx.semantic_model:
+        p += f"\n## SEMANTIC MODEL (TMDL)\nThe full data model schema is below. Use it to understand table relationships, measures, and the broader context beyond the inline data.\n```\n{ctx.semantic_model}\n```\n"
+
     if ctx.extra_context:
         p += f"\n## ADDITIONAL CONTEXT\n{ctx.extra_context}\n"
     return p
@@ -1056,31 +1201,46 @@ Supported types: {charts}
 # LLM API CALL (via Azure OpenAI -- Bechtel)
 # ══════════════════════════════════════════════════════════
 async def call_llm(system: str, messages: list[dict], ctx: UserContext = None) -> str:
-    """Call Azure OpenAI API and return the text response.
+    """Call LLM API and return the text response.
     Uses ctx for per-user model overrides when provided."""
-    api_key = AZURE_OPENAI_API_KEY
-    endpoint = AZURE_OPENAI_ENDPOINT
+    api_key = ctx.effective_api_key if ctx else AZURE_OPENAI_API_KEY
+    endpoint = ctx.effective_api_endpoint if ctx else AZURE_OPENAI_ENDPOINT
     model = ctx.effective_llm_model if ctx else LLM_MODEL
 
     if not api_key or not endpoint:
-        raise HTTPException(status_code=500, detail="Azure OpenAI API key/endpoint not configured.")
+        raise HTTPException(status_code=500, detail="LLM API key/endpoint not configured.")
 
-    # Azure OpenAI uses OpenAI-compatible chat format
+    # Determine API format based on endpoint
+    is_azure = "azure" in endpoint.lower()
+    
     api_messages = [{"role": "system", "content": system}] + messages
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    headers = {
+        "Content-Type": "application/json",
+    }
+    
+    if is_azure:
+        headers["api-key"] = api_key
+        request_data = {
+            "model": model,
+            "max_completion_tokens": 4096,
+            "messages": api_messages,
+            "reasoning_effort": "none",
+        }
+    else:
+        # OpenRouter or other OpenAI-compatible APIs
+        headers["Authorization"] = f"Bearer {api_key}"
+        request_data = {
+            "model": model,
+            "max_completion_tokens": 4096,
+            "messages": api_messages,
+        }
+
+    async with httpx.AsyncClient(timeout=120, verify=False) as client:
         resp = await client.post(
             endpoint,
-            json={
-                "model": model,
-                "max_tokens": 4096,
-                "messages": api_messages,
-                "reasoning_effort": "none",
-            },
-            headers={
-                "api-key": api_key,
-                "Content-Type": "application/json",
-            },
+            json=request_data,
+            headers=headers,
         )
 
         if resp.status_code != 200:
@@ -1093,6 +1253,7 @@ async def call_llm(system: str, messages: list[dict], ctx: UserContext = None) -
             # Log the prompt size for debugging context-window issues
             total_chars = sum(len(m.get("content", "")) for m in api_messages)
             logging.error(f"LLM API error ({resp.status_code}): {safe_msg} | model={model} prompt_chars={total_chars}")
+            logging.error(f"Response text: {resp.text[:500]}")
             raise HTTPException(
                 status_code=502,
                 detail=f"LLM API error: {safe_msg}",
@@ -1108,10 +1269,11 @@ async def call_llm(system: str, messages: list[dict], ctx: UserContext = None) -
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
+    ctx = get_user_context()
     return HealthResponse(
         status="ok",
         databricks_connected=True,
-        llm_configured=bool(AZURE_OPENAI_API_KEY),
+        llm_configured=bool(ctx.effective_api_key),
     )
 
 
@@ -1165,7 +1327,7 @@ async def warehouse_status(connection_id: str = None):
 async def chat(req: ChatRequest, request: Request):
     """Main chat endpoint -- runs the agentic loop (rate-limited by IP)."""
     _check_rate_limit(request.client.host)
-    ctx = get_user_context()
+    ctx = get_user_context(report_id=req.report_id or "")
 
     # -- INLINE DATA MODE --
     if req.inline_data:
@@ -1234,6 +1396,9 @@ async def chat(req: ChatRequest, request: Request):
         allowed_charts=ALL_CHART_TYPES,
     )
 
+    logging.info(f"[CHAT] connections={len(ctx.connections)}, semantic_model={len(ctx.semantic_model)} chars, system_prompt={len(system)} chars")
+    logging.info(f"[CHAT] system_prompt_start: {system[:300]}")
+
     # -- SCHEMA-ONLY MODE: semantic model loaded but no connections --
     if not ctx.connections and ctx.semantic_model:
         logging.info(f"Schema-only mode: TMDL loaded ({len(ctx.semantic_model)} chars), no connections")
@@ -1265,14 +1430,16 @@ async def chat(req: ChatRequest, request: Request):
     queries_executed = []
     max_loops = 5
 
-    for _ in range(max_loops):
+    for loop_i in range(max_loops):
         # Call LLM
         ai_text = await call_llm(system, messages, ctx=ctx)
+        logging.info(f"[LOOP {loop_i+1}] LLM response ({len(ai_text)} chars): {ai_text[:300]}...")
 
         # Extract sql_exec blocks (with optional connection= parameter)
         sql_blocks = re.findall(r"```sql_exec(?:\s+connection=(\S+))?\n(.*?)```", ai_text, re.DOTALL)
 
         if not sql_blocks:
+            logging.info(f"[LOOP {loop_i+1}] No sql_exec blocks found, returning final response")
             return ChatResponse(
                 response=_clean_ai_response(ai_text), queries_executed=queries_executed,
             )
@@ -1284,6 +1451,7 @@ async def chat(req: ChatRequest, request: Request):
             conn_id = conn_id.strip() if conn_id else None
             result = await execute_sql(sql, connections=ctx.connections, connection_id=conn_id)
             is_error = result.startswith("ERROR")
+            logging.info(f"[LOOP {loop_i+1}] SQL: {sql[:200]}... => {'ERROR' if is_error else f'{len(result)} chars'}: {result[:200]}")
             queries_executed.append({"sql": sql, "result": result[:500], "error": is_error})
             results_text += f"\n\n### Query {i + 1}:\n```\n{sql}\n```\nResults:\n```\n{result}\n```"
 
@@ -1308,24 +1476,86 @@ async def update_config(req: ConfigUpdate):
         config["llm_model"] = req.llm_model
     if req.extra_context is not None:
         config["extra_context"] = req.extra_context
+    if req.api_endpoint is not None:
+        config["api_endpoint"] = req.api_endpoint
+    if req.api_key is not None:
+        config["api_key"] = req.api_key
+    if req.current_llm_preset is not None:
+        config["current_llm_preset"] = req.current_llm_preset
     _save_config(config)
     _invalidate_all_schema()
     return {"status": "updated"}
 
 
 @app.get("/config")
-async def get_config():
+async def get_config(report_id: str = ""):
     """Retrieve current configuration."""
-    ctx = get_user_context()
+    ctx = get_user_context(report_id=report_id)
     return {
         "llm_model": ctx.effective_llm_model,
         "semantic_model_loaded": bool(ctx.semantic_model),
         "semantic_model_chars": len(ctx.semantic_model),
         "extra_context": ctx.extra_context,
+        "api_endpoint": ctx.api_endpoint,
+        "api_key_configured": bool(ctx.api_key),
+        "llm_presets": ctx.llm_presets,
+        "current_llm_preset": ctx.current_llm_preset,
+        "tmdl_projects": _list_tmdl_projects(),
     }
 
 
-# -- Connection CRUD endpoints --
+@app.post("/llm-presets")
+async def create_llm_preset(req: LLMPresetCreate):
+    """Create or update an LLM preset."""
+    config = _load_config()
+    if "llm_presets" not in config:
+        config["llm_presets"] = {
+            "default": {
+                "name": "Default (Azure OpenAI)",
+                "api_endpoint": "",
+                "api_key": "",
+                "llm_model": ""
+            }
+        }
+
+    config["llm_presets"][req.preset_id] = req.preset.dict()
+    _save_config(config)
+    _invalidate_all_schema()
+    return {"status": "created", "preset_id": req.preset_id}
+
+
+@app.delete("/llm-presets/{preset_id}")
+async def delete_llm_preset(preset_id: str):
+    """Delete an LLM preset."""
+    if preset_id == "default":
+        raise HTTPException(status_code=400, detail="Cannot delete default preset")
+
+    config = _load_config()
+    if "llm_presets" in config and preset_id in config["llm_presets"]:
+        del config["llm_presets"][preset_id]
+
+        # If the deleted preset was current, switch to default
+        if config.get("current_llm_preset") == preset_id:
+            config["current_llm_preset"] = "default"
+
+        _save_config(config)
+        _invalidate_all_schema()
+        return {"status": "deleted", "preset_id": preset_id}
+    else:
+        raise HTTPException(status_code=404, detail="Preset not found")
+
+
+@app.post("/llm-presets/{preset_id}/select")
+async def select_llm_preset(preset_id: str):
+    """Select an LLM preset as current."""
+    config = _load_config()
+    if "llm_presets" not in config or preset_id not in config["llm_presets"]:
+        raise HTTPException(status_code=404, detail="Preset not found")
+
+    config["current_llm_preset"] = preset_id
+    _save_config(config)
+    _invalidate_all_schema()
+    return {"status": "selected", "preset_id": preset_id}
 
 @app.get("/connections")
 async def list_connections():
@@ -1364,12 +1594,22 @@ async def save_all_connections_endpoint(req: dict):
             h = c["host"].strip()
             if h and not h.startswith("http"):
                 c["host"] = f"https://{h}"
-        # Preserve redacted secrets from the old connection
+        # Preserve secrets from the old connection when sentinel, redacted, or empty value is sent
         old = old_conns.get(cid, {})
-        if c.get("token", "").endswith("...") and old.get("token"):
-            c["token"] = old["token"]
-        if c.get("password") == "***" and old.get("password"):
-            c["password"] = old["password"]
+        real_old_token = old.get("token", "")
+        real_old_password = old.get("password", "")
+        # Preserve token if: sentinel, redacted, or empty (user didn't re-enter it)
+        incoming_token = c.get("token") or ""
+        if real_old_token and real_old_token != "__KEEP__":
+            if incoming_token in ("__KEEP__", "") or incoming_token.endswith("..."):
+                c["token"] = real_old_token
+                logging.info(f"Connection '{cid}': preserved existing token")
+        # Preserve password if: sentinel, redacted, or empty
+        incoming_password = c.get("password") or ""
+        if real_old_password and real_old_password not in ("__KEEP__", "***"):
+            if incoming_password in ("__KEEP__", "***", ""):
+                c["password"] = real_old_password
+                logging.info(f"Connection '{cid}': preserved existing password")
         updated.append(c)
 
     config["connections"] = updated
@@ -1419,8 +1659,9 @@ async def upload_tmdl(req: TmdlUploadRequest):
 
     model_content = "\n\n".join(parts)
 
-    # Save to local file
-    _save_semantic_model(model_content)
+    # Save to per-report folder (or legacy global file)
+    rid = req.report_id or ""
+    _save_semantic_model(model_content, rid)
 
     # If connections were provided with the upload, save them to config too
     if req.connections is not None:
@@ -1432,11 +1673,34 @@ async def upload_tmdl(req: TmdlUploadRequest):
 
     return {
         "status": "loaded",
+        "report_id": rid,
         "files_loaded": len(filtered),
         "files_skipped": len(req.files) - len(filtered),
         "files": [f.name for f in sorted(filtered, key=lambda x: x.name)],
         "total_chars": len(model_content),
     }
+
+
+@app.get("/tmdl-projects")
+async def list_tmdl_projects():
+    """List all stored TMDL projects."""
+    projects = _list_tmdl_projects()
+    return {"projects": projects}
+
+
+@app.delete("/tmdl-projects/{report_id}")
+async def delete_tmdl_project(report_id: str):
+    """Delete a TMDL project by report_id."""
+    if not report_id or report_id.strip() == "":
+        raise HTTPException(status_code=400, detail="report_id is required.")
+    # Sanitize to prevent path traversal
+    safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", report_id)
+    if safe_id != report_id:
+        raise HTTPException(status_code=400, detail="Invalid report_id.")
+    deleted = _delete_tmdl_project(report_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"TMDL project '{report_id}' not found.")
+    return {"status": "deleted", "report_id": report_id}
 
 
 @app.post("/test-connection")
