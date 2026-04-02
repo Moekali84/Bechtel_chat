@@ -1107,6 +1107,7 @@ export class PBIChat implements IVisual {
             const msg = `Uploaded ${data.files_loaded} .tmdl file(s) (${(data.total_chars / 1024).toFixed(1)} KB) as "${reportId}"${skipped}`;
             resultEl.textContent = msg;
             this.currentReportId = reportId;
+            this.persistData();
             this.pendingTmdlFiles = [];
             this.renderTmdlFileList();
             this.tmdlLoaded = true;
@@ -1429,6 +1430,8 @@ export class PBIChat implements IVisual {
             this.fmtSettings = this.fmtService.populateFormattingSettingsModel(PBIChatFormattingSettings, dv);
         }
 
+        this.loadPersistedData(options);
+
         // Extract inline data from field wells
         this.inlineDataCsv = "";
         this.inlineStats = "";
@@ -1690,6 +1693,7 @@ export class PBIChat implements IVisual {
             this.history.push({ role: "user", content: text });
             this.history.push({ role: "assistant", content: data.response });
             this.addMessage("ai", data.response);
+            this.persistData();
 
         } catch (e: any) {
             this.hideTyping();
@@ -2314,5 +2318,45 @@ export class PBIChat implements IVisual {
         }
 
         return t;
+    }
+
+    private loadPersistedData(options: VisualUpdateOptions): void {
+        if (options && options.dataViews && options.dataViews[0] && options.dataViews[0].metadata.objects) {
+            const obj = options.dataViews[0].metadata.objects.pbichat;
+            if (obj) {
+                this.history = obj.history || [];
+                this.currentReportId = obj.currentReportId || "";
+                // Re-render messages if history loaded
+                if (this.history.length > 0) {
+                    this.renderMessages();
+                }
+            }
+        }
+    }
+
+    private renderMessages(): void {
+        // Clear existing messages except welcome
+        const msgs = this.msgsEl.querySelectorAll(".dia-msg");
+        msgs.forEach(msg => msg.remove());
+        // Re-add welcome if no messages
+        if (this.history.length === 0 && !this.welcomeEl.parentNode) {
+            this.msgsEl.appendChild(this.welcomeEl);
+        }
+        // Add messages
+        for (const msg of this.history) {
+            this.addMessage(msg.role, msg.content);
+        }
+    }
+
+    private persistData(): void {
+        const data = {
+            history: this.history,
+            currentReportId: this.currentReportId
+        };
+        this.host.persistProperties({
+            merge: {
+                pbichat: data
+            }
+        });
     }
 }

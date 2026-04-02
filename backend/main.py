@@ -535,7 +535,7 @@ async def _execute_databricks_sql(sql: str, conn: dict) -> str:
         if len(parts) >= 2:
             body["schema"] = ".".join(parts[1:])
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=60, verify=False) as client:
         resp = await client.post(
             url,
             json=body,
@@ -663,7 +663,7 @@ async def get_warehouse_state(conn: dict = None) -> dict:
     url = f"{host.rstrip('/')}/api/2.0/sql/warehouses/{warehouse_id}"
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
             resp = await client.get(
                 url,
                 headers={"Authorization": f"Bearer {token}"},

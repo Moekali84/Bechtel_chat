@@ -104,10 +104,30 @@ Configuration data (connections, semantic model, extra context) is stored in loc
 
 ### Running the Backend
 
+#### Quick Start Scripts (Windows)
+For Windows users, use the provided startup scripts:
+
+```powershell
+# PowerShell (recommended)
+cd backend
+.\start-backend.ps1
+
+# Or CMD
+start-backend.bat
+```
+
+These scripts automatically:
+- Check Python installation
+- Create virtual environment (in `C:\temp\pbiviz-venv`)
+- Install dependencies
+- Start uvicorn server
+- Perform health check
+
+#### Manual Setup
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # On Windows: .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 cp .env.example .env   # Fill in your Azure OpenAI key and password
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload

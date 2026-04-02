@@ -140,3 +140,564 @@ Today is 2026-03-28. Use this when the user says "latest", "recent", "this month
 
 The most recent recorded incident occurred on March 26, 2026....
 2026-03-28 16:16:10,685 INFO [LOOP 1] No sql_exec blocks found, returning final response
+2026-04-02 07:57:50,555 WARNING Python-dotenv could not parse statement starting at line 11
+2026-04-02 07:58:35,157 INFO Connection 'gold-schema': preserved existing token
+2026-04-02 08:11:51,309 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:12:03,585 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:12:15,712 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:12:27,809 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:12:39,913 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:12:52,044 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:13:04,181 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:13:16,304 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:13:28,392 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:13:40,493 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:13:52,621 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:14:04,742 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:14:16,877 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:14:28,971 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:14:41,068 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:14:53,171 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:15:05,279 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:15:17,387 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:15:29,567 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:15:41,668 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:15:53,776 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:16:05,898 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:16:18,001 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:16:30,103 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:16:42,217 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:16:54,319 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:17:01,544 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f12e8d-0fae-1026-8223-a15aa837ba8a "HTTP/1.1 200 OK"
+2026-04-02 08:17:21,756 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:17:25,825 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:17:36,271 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:17:36,524 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:17:37,050 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:17:37,057 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:17:37,058 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:17:37,193 INFO HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 401 Unauthorized"
+2026-04-02 08:17:37,195 ERROR LLM API error (401): Missing Authentication header | model=deepseek/deepseek-v3.2 prompt_chars=83729
+2026-04-02 08:17:37,195 ERROR Response text: {"error":{"message":"Missing Authentication header","code":401}}
+2026-04-02 08:23:53,091 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:23:54,272 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:23:58,913 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:23:59,182 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:23:59,668 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:23:59,677 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:23:59,677 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:24:10,084 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:24:10,085 INFO [LOOP 1] LLM response (1437 chars): ```sql_exec connection=gold-schema
+WITH incidents AS (
+  SELECT
+    CAST(e.EVENT_DATE AS DATE) AS event_date,
+    d.CASE_NUMBER,
+    g.JOB_NAME,
+    g.JOB_NUMBER,
+    g.GBU_NAME,
+    d.EVENT_TYPE,
+    d."Highest Severity" AS highest_severity,
+    d.FIRST_AID,
+    d.RECORDABLE,
+    d.RESTRICTED_WORKD...
+2026-04-02 08:24:10,661 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:24:10,663 INFO [LOOP 1] SQL: WITH incidents AS (
+  SELECT
+    CAST(e.EVENT_DATE AS DATE) AS event_date,
+    d.CASE_NUMBER,
+    g.JOB_NAME,
+    g.JOB_NUMBER,
+    g.GBU_NAME,
+    d.EVENT_TYPE,
+    d."Highest Severity" AS highest_se... => ERROR: ERROR: 
+[PARSE_SYNTAX_ERROR] Syntax error at or near '"Highest Severity"'. SQLSTATE: 42601 (line 9, pos 6)
+
+== SQL ==
+WITH incidents AS (
+  SELECT
+    CAST(e.EVENT_DATE AS DATE) AS event_date,
+    d.C
+2026-04-02 08:24:17,233 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:24:17,235 INFO [LOOP 2] LLM response (1121 chars): ```sql_exec connection=gold-schema
+SELECT
+  CAST(g.EVENT_DATE AS DATE) AS event_date,
+  d.CASE_NUMBER,
+  g.JOB_NAME,
+  g.JOB_NUMBER,
+  g.GBU_NAME,
+  d.EVENT_TYPE,
+  CASE
+    WHEN d.FIRST_AID = 'Y' AND d.RECORDABLE = 'N' THEN 'First Aid'
+    WHEN d.RECORDABLE = 'Y' AND d.RESTRICTED_WORKDAY = 'N' AND ...
+2026-04-02 08:24:36,867 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:24:37,740 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:24:43,180 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:24:43,182 INFO [LOOP 2] SQL: SELECT
+  CAST(g.EVENT_DATE AS DATE) AS event_date,
+  d.CASE_NUMBER,
+  g.JOB_NAME,
+  g.JOB_NUMBER,
+  g.GBU_NAME,
+  d.EVENT_TYPE,
+  CASE
+    WHEN d.FIRST_AID = 'Y' AND d.RECORDABLE = 'N' THEN 'First Aid... => 1419 chars: Columns: event_date, CASE_NUMBER, JOB_NAME, JOB_NUMBER, GBU_NAME, EVENT_TYPE, highest_severity, FIRST_AID, RECORDABLE, RESTRICTED_WORKDAY, LOST_TIME, FATALITY
+Rows: 9
+
+event_date | CASE_NUMBER | JOB_N
+2026-04-02 08:24:53,972 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:24:53,973 INFO [LOOP 3] LLM response (1781 chars): ### Latest incidents for NS&E projects — last 7 days
+**Total Incidents** 9 | **Latest Date** 2026-03-30 | **Projects** 2
+
+```chart
+{
+  "type": "bar",
+  "title": "Incidents by Date",
+  "labels": ["2026-03-26", "2026-03-27", "2026-03-30"],
+  "datasets": [
+    { "label": "Incidents", "data": [3, 2, 4] ...
+2026-04-02 08:24:53,974 INFO [LOOP 3] No sql_exec blocks found, returning final response
+2026-04-02 08:24:54,226 INFO Connection 'gold-schema': preserved existing token
+2026-04-02 08:24:55,211 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:25:11,325 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 401 Unauthorized"
+2026-04-02 08:25:11,547 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 401 Unauthorized"
+2026-04-02 08:25:13,388 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 401 Unauthorized"
+2026-04-02 08:25:13,616 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 401 Unauthorized"
+2026-04-02 08:26:00,414 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:26:21,258 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:26:22,021 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:26:25,534 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:26:25,785 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:26:26,381 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:26:26,391 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:26:26,392 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:26:32,985 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:26:32,990 INFO [LOOP 1] LLM response (806 chars): ```sql_exec
+connection=gold-schema
+SELECT
+  CAST(e.EVENT_DATE AS DATE) AS event_date,
+  e.CASE_NUMBER,
+  g.JOB_NAME,
+  g.GBU_NAME,
+  d."Highest Severity" AS highest_severity,
+  d.EVENT_TYPE,
+  d.INCIDENT_DESCRIPTION
+FROM `gold-poland-prod`.iris.vw_global_events_details d
+JOIN `gold-poland-prod`.iris...
+2026-04-02 08:26:33,641 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:26:33,671 INFO [LOOP 1] SQL: SELECT
+  CAST(e.EVENT_DATE AS DATE) AS event_date,
+  e.CASE_NUMBER,
+  g.JOB_NAME,
+  g.GBU_NAME,
+  d."Highest Severity" AS highest_severity,
+  d.EVENT_TYPE,
+  d.INCIDENT_DESCRIPTION
+FROM `gold-poland-p... => ERROR: ERROR: 
+[PARSE_SYNTAX_ERROR] Syntax error at or near '"Highest Severity"'. SQLSTATE: 42601 (line 6, pos 4)
+
+== SQL ==
+SELECT
+  CAST(e.EVENT_DATE AS DATE) AS event_date,
+  e.CASE_NUMBER,
+  g.JOB_NAME,
+
+2026-04-02 08:26:39,251 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:26:39,252 INFO [LOOP 2] LLM response (1001 chars): ```sql_exec
+connection=gold-schema
+SELECT
+  CAST(g.EVENT_DATE AS DATE) AS event_date,
+  d.CASE_NUMBER,
+  g.JOB_NAME,
+  g.GBU_NAME,
+  CASE
+    WHEN d.FIRST_AID = 'Y' AND COALESCE(d.RECORDABLE,'N') = 'N' THEN 'First Aid'
+    WHEN d.RECORDABLE = 'Y' AND COALESCE(d.RESTRICTED_WORKDAY,'N') = 'N' AND COAL...
+2026-04-02 08:26:45,007 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:26:45,008 INFO [LOOP 2] SQL: SELECT
+  CAST(g.EVENT_DATE AS DATE) AS event_date,
+  d.CASE_NUMBER,
+  g.JOB_NAME,
+  g.GBU_NAME,
+  CASE
+    WHEN d.FIRST_AID = 'Y' AND COALESCE(d.RECORDABLE,'N') = 'N' THEN 'First Aid'
+    WHEN d.RECOR... => 832 chars: Columns: event_date, CASE_NUMBER, JOB_NAME, GBU_NAME, highest_severity, EVENT_TYPE, INCIDENT_DESCRIPTION
+Rows: 6
+
+event_date | CASE_NUMBER | JOB_NAME | GBU_NAME | highest_severity | EVENT_TYPE | INCID
+2026-04-02 08:26:52,858 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:26:52,859 INFO [LOOP 3] LLM response (1020 chars): ### Latest Incidents for NS&E Projects — Last 7 Days
+**Total Incidents** 6 | **Latest Date** 2026-03-30 | **Projects** 2
+
+```chart
+{
+  "type": "bar",
+  "title": "Incidents by Date",
+  "labels": ["2026-03-27", "2026-03-30"],
+  "datasets": [
+    { "label": "Incidents", "data": [2, 4] }
+  ]
+}
+```
+
+| Ev...
+2026-04-02 08:26:52,860 INFO [LOOP 3] No sql_exec blocks found, returning final response
+2026-04-02 08:33:30,424 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:33:30,701 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:33:31,179 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:33:31,188 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:33:31,189 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:33:33,896 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:33:33,898 INFO [LOOP 1] LLM response (326 chars): ```sql_exec
+SELECT
+  ge.JOB_NAME,
+  COUNT(*) AS recordable_count
+FROM `gold-poland-prod`.iris.vw_global_events_details ed
+JOIN `gold-poland-prod`.iris.vw_global_events ge
+  ON ed.INCIDENT_EVENT_SEQ = ge.INCIDENT_EVENT_SEQ
+WHERE ed.RECORDABLE = 'Y'
+GROUP BY ge.JOB_NAME
+ORDER BY recordable_count DESC,...
+2026-04-02 08:33:38,632 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:33:38,634 INFO [LOOP 1] SQL: SELECT
+  ge.JOB_NAME,
+  COUNT(*) AS recordable_count
+FROM `gold-poland-prod`.iris.vw_global_events_details ed
+JOIN `gold-poland-prod`.iris.vw_global_events ge
+  ON ed.INCIDENT_EVENT_SEQ = ge.INCIDENT_... => 354 chars: Columns: JOB_NAME, recordable_count
+Rows: 10
+
+JOB_NAME | recordable_count
+--- | ---
+Los Alamos | 1694
+Lawrence Livermore | 1537
+Bechtel Jacobs | 653
+Riyadh Metro Rail | 636
+INEEL | 605
+Waste Treatment
+2026-04-02 08:33:44,708 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:33:44,710 INFO [LOOP 2] LLM response (1049 chars): ### Projects with Highest Recordables
+**Highest Project** Los Alamos | **Recordables** 1,694 | **Top 10 Total** 7,616
+
+```chart
+{
+  "type": "horizontalBar",
+  "title": "Top 10 Projects by Recordable Count",
+  "labels": [
+    "Los Alamos",
+    "Lawrence Livermore",
+    "Bechtel Jacobs",
+    "Riyadh M...
+2026-04-02 08:33:44,711 INFO [LOOP 2] No sql_exec blocks found, returning final response
+2026-04-02 08:34:36,387 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:34:36,676 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:34:36,689 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:34:36,689 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:34:40,372 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:34:40,374 INFO [LOOP 1] LLM response (453 chars): ```sql_exec
+SELECT
+  ge.JOB_NAME AS project,
+  COUNT(ed.RECORDABLE) AS recordable_count
+FROM `gold-poland-prod`.iris.vw_global_events_details ed
+JOIN `gold-poland-prod`.iris.vw_global_events ge
+  ON ed.INCIDENT_EVENT_SEQ = ge.INCIDENT_EVENT_SEQ
+WHERE ed.RECORDABLE = 'Y'
+  AND ge.GBU_NAME = 'NS&E'
+  ...
+2026-04-02 08:34:44,281 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:34:44,283 INFO [LOOP 1] SQL: SELECT
+  ge.JOB_NAME AS project,
+  COUNT(ed.RECORDABLE) AS recordable_count
+FROM `gold-poland-prod`.iris.vw_global_events_details ed
+JOIN `gold-poland-prod`.iris.vw_global_events ge
+  ON ed.INCIDENT_E... => 113 chars: Columns: project, recordable_count
+Rows: 1
+
+project | recordable_count
+--- | ---
+Waste Treatment Plant (WTP) | 1
+
+2026-04-02 08:34:47,525 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:34:47,528 INFO [LOOP 2] LLM response (183 chars): ### Project with Highest Recordables — Last Month
+**Project** Waste Treatment Plant (WTP) | **Recordables** 1
+
+| Project | Recordables |
+|---|---:|
+| Waste Treatment Plant (WTP) | 1 |...
+2026-04-02 08:34:47,529 INFO [LOOP 2] No sql_exec blocks found, returning final response
+2026-04-02 08:35:18,083 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:35:18,343 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:35:18,354 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:35:18,355 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:35:21,750 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:35:21,751 INFO [LOOP 1] LLM response (436 chars): ```sql_exec
+SELECT
+  COALESCE(g.JOB_NAME, 'Unknown') AS project,
+  COUNT(*) AS recordables
+FROM `gold-poland-prod`.iris.vw_global_events_details d
+JOIN `gold-poland-prod`.iris.vw_global_events g
+  ON d.INCIDENT_EVENT_SEQ = g.INCIDENT_EVENT_SEQ
+WHERE d.RECORDABLE = 'Y'
+  AND g.EVENT_DATE >= DATE '202...
+2026-04-02 08:35:25,480 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:35:25,482 INFO [LOOP 1] SQL: SELECT
+  COALESCE(g.JOB_NAME, 'Unknown') AS project,
+  COUNT(*) AS recordables
+FROM `gold-poland-prod`.iris.vw_global_events_details d
+JOIN `gold-poland-prod`.iris.vw_global_events g
+  ON d.INCIDENT_E... => 159 chars: Columns: project, recordables
+Rows: 3
+
+project | recordables
+--- | ---
+Port Arthur Liquefaction Project | 1
+Rio Grande LNG | 1
+Waste Treatment Plant (WTP) | 1
+
+2026-04-02 08:35:29,870 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:35:29,871 INFO [LOOP 2] LLM response (574 chars): ### Top Projects by Recordables — Last Month
+**Projects Returned** 3 | **Highest Recordables** 1 | **Total Recordables** 3
+
+```chart
+{
+  "type": "bar",
+  "title": "Top Projects by Recordables — Last Month",
+  "labels": [
+    "Port Arthur Liquefaction Project",
+    "Rio Grande LNG",
+    "Waste Treatm...
+2026-04-02 08:35:29,872 INFO [LOOP 2] No sql_exec blocks found, returning final response
+2026-04-02 08:36:52,121 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:36:52,412 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:36:52,423 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:36:52,424 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:36:55,713 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:36:55,714 INFO [LOOP 1] LLM response (458 chars): ```sql_exec
+SELECT
+  ge.GBU_NAME,
+  ge.JOB_NAME AS project,
+  COUNT(*) AS recordables
+FROM `gold-poland-prod`.iris.vw_global_events_details ed
+JOIN `gold-poland-prod`.iris.vw_global_events ge
+  ON ed.INCIDENT_EVENT_SEQ = ge.INCIDENT_EVENT_SEQ
+WHERE ge.GBU_NAME = 'NS&E'
+  AND ge.EVENT_DATE >= DATE '2...
+2026-04-02 08:36:59,587 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:36:59,589 INFO [LOOP 1] SQL: SELECT
+  ge.GBU_NAME,
+  ge.JOB_NAME AS project,
+  COUNT(*) AS recordables
+FROM `gold-poland-prod`.iris.vw_global_events_details ed
+JOIN `gold-poland-prod`.iris.vw_global_events ge
+  ON ed.INCIDENT_EVE... => 288 chars: Columns: GBU_NAME, project, recordables
+Rows: 5
+
+GBU_NAME | project | recordables
+--- | --- | ---
+NS&E | Lawrence Livermore | 61
+NS&E | Waste Treatment Plant (WTP) | 20
+NS&E | CNS Y12 NSC (TN) | 11
+NS
+2026-04-02 08:37:04,788 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:37:04,789 INFO [LOOP 2] LLM response (812 chars): ### Top 5 NS&E Projects by Recordables — Last Year
+**Highest Project** Lawrence Livermore | **Recordables** 61 | **Top 5 Total** 111
+
+```chart
+{
+  "type": "horizontalBar",
+  "title": "Top 5 NS&E Projects by Recordables — Last Year",
+  "labels": [
+    "Lawrence Livermore",
+    "Waste Treatment Plant ...
+2026-04-02 08:37:04,790 INFO [LOOP 2] No sql_exec blocks found, returning final response
+2026-04-02 08:41:59,589 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:41:59,864 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:42:00,443 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:42:00,459 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:42:00,461 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:42:03,875 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:42:03,878 INFO [LOOP 1] LLM response (363 chars): ```sql_exec
+SELECT
+  LC_VIOLATION,
+  COUNT(*) AS violation_count
+FROM `gold-poland-prod`.iris.vw_life_critical_cleaned
+WHERE YEAR(VIOLATION_DATE) = 2025
+  AND JOB_SEQ IN (
+    SELECT DISTINCT JOB_SEQ
+    FROM `gold-poland-prod`.iris.vw_job_location_gbu
+    WHERE GBU_NAME = 'NS&E'
+  )
+GROUP BY LC_VIO...
+2026-04-02 08:42:07,139 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:42:07,141 INFO [LOOP 1] SQL: SELECT
+  LC_VIOLATION,
+  COUNT(*) AS violation_count
+FROM `gold-poland-prod`.iris.vw_life_critical_cleaned
+WHERE YEAR(VIOLATION_DATE) = 2025
+  AND JOB_SEQ IN (
+    SELECT DISTINCT JOB_SEQ
+    FROM `go... => 166 chars: Columns: LC_VIOLATION, violation_count
+Rows: 3
+
+LC_VIOLATION | violation_count
+--- | ---
+Dropped Objects | 22
+Work at Height | 18
+Fall Protection and Prevention | 11
+
+2026-04-02 08:42:10,967 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:42:10,969 INFO [LOOP 2] LLM response (567 chars): ### Top 3 Life Critical Violations — NS&E in 2025
+**Total Violations** 51 | **Top Violation** Dropped Objects | **Count** 22
+
+```chart
+{
+  "type": "pie",
+  "title": "Top 3 Life Critical Violations — NS&E in 2025",
+  "labels": ["Dropped Objects", "Work at Height", "Fall Protection and Prevention"],
+ ...
+2026-04-02 08:42:10,970 INFO [LOOP 2] No sql_exec blocks found, returning final response
+2026-04-02 08:42:34,100 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:42:34,393 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:42:34,410 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 08:42:34,411 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 08:42:38,703 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:42:38,705 INFO [LOOP 1] LLM response (523 chars): ```sql_exec
+SELECT
+  j.GBU_NAME,
+  l.JOB_NAME,
+  l.LC_VIOLATION,
+  COUNT(*) AS violation_count
+FROM `gold-poland-prod`.iris.vw_life_critical_cleaned l
+JOIN `gold-poland-prod`.iris.vw_job_location_gbu j
+  ON l.JOB_SEQ = j.JOB_SEQ
+WHERE j.GBU_NAME = 'NS&E'
+  AND YEAR(l.VIOLATION_DATE) = 2025
+  AND l.L...
+2026-04-02 08:42:41,041 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 08:42:41,043 INFO [LOOP 1] SQL: SELECT
+  j.GBU_NAME,
+  l.JOB_NAME,
+  l.LC_VIOLATION,
+  COUNT(*) AS violation_count
+FROM `gold-poland-prod`.iris.vw_life_critical_cleaned l
+JOIN `gold-poland-prod`.iris.vw_job_location_gbu j
+  ON l.JOB... => 637 chars: Columns: GBU_NAME, JOB_NAME, LC_VIOLATION, violation_count
+Rows: 8
+
+GBU_NAME | JOB_NAME | LC_VIOLATION | violation_count
+--- | --- | --- | ---
+NS&E | Uranium Processing Facility (UPF) (EPC Work) | Dro
+2026-04-02 08:42:46,629 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-02 08:42:46,631 INFO [LOOP 2] LLM response (913 chars): ### Top 3 Life Critical Violations by Project — NS&E in 2025
+**Projects** 4 | **Violation Types** 3 | **Total Violations** 51
+
+```chart
+{
+  "type": "bar",
+  "title": "Life Critical Violations by Project — NS&E in 2025",
+  "labels": [
+    "Uranium Processing Facility (UPF) (EPC Work)",
+    "Mobile La...
+2026-04-02 08:42:46,632 INFO [LOOP 2] No sql_exec blocks found, returning final response
+2026-04-02 08:50:37,538 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 08:50:38,528 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:08:14,649 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:08:16,815 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:08:39,842 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:08:40,656 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:09:14,641 INFO Connection 'gold-schema': preserved existing token
+2026-04-02 09:09:15,493 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:09:28,580 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 401 Unauthorized"
+2026-04-02 09:09:28,794 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 401 Unauthorized"
+2026-04-02 09:09:32,819 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 401 Unauthorized"
+2026-04-02 09:09:33,309 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 401 Unauthorized"
+2026-04-02 09:09:55,850 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:09:58,211 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:09:58,922 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:10:05,214 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:10:05,491 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:10:05,960 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:10:05,967 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 09:10:05,968 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 09:10:06,851 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-04-02 09:10:06,852 ERROR LLM API error (404): HTTP 404 | model=gpt-4 prompt_chars=83729
+2026-04-02 09:10:06,853 ERROR Response text: {
+  "error": {
+    "type": "invalid_request_error",
+    "code": "DeploymentNotFound",
+    "message": "The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again."
+  }
+}
+2026-04-02 09:11:21,014 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:11:23,139 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:11:23,856 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:11:26,663 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:11:26,912 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:11:27,379 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-02 09:11:27,386 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-02 09:11:27,387 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-02. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-02 09:11:28,132 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-04-02 09:11:28,134 ERROR LLM API error (404): HTTP 404 | model=gpt-4 prompt_chars=83729
+2026-04-02 09:11:28,134 ERROR Response text: {
+  "error": {
+    "type": "invalid_request_error",
+    "code": "DeploymentNotFound",
+    "message": "The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again."
+  }
+}
+2026-04-02 09:13:47,727 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 09:13:48,475 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
