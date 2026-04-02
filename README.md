@@ -245,9 +245,9 @@ cd backend
 
 ## Pricing & Unit Economics
 
-### LLM: DeepSeek V3.2 via OpenRouter
-- Input: $0.26 / 1M tokens | Output: $0.38 / 1M tokens
-- Cost per chat query: ~$0.003 (0.3 cents)
+### LLM: Configurable model (no required provider)
+- Input/output costs depend on your chosen model/provider (Azure OpenAI, OpenAI, etc.)
+- Recommended default for local deploy: `gpt-4` (via Azure endpoint in `.env`) or `gpt-5.2` when available.
 
 ### Cost Per User Per Month
 
