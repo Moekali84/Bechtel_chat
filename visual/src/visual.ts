@@ -1570,6 +1570,26 @@ export class PBIChat implements IVisual {
     // ======================================
     private clearChat(): void {
         this.history = [];
+        
+        // Clear from localStorage
+        const storageKey = `pbichat_history_${this.currentReportId || "default"}`;
+        try {
+            localStorage.removeItem(storageKey);
+        } catch (e) {
+            console.warn("Failed to clear chat history from localStorage:", e);
+        }
+        
+        // Clear from sessionStorage
+        try {
+            const sessionKey = "pbichat_history_session";
+            sessionStorage.removeItem(sessionKey);
+        } catch (e) {
+            console.warn("Failed to clear chat history from sessionStorage:", e);
+        }
+        
+        // Clear from Power BI persisted data
+        this.persistData();
+        
         this.msgsEl.innerHTML = "";
         const welcome = document.createElement("div");
         welcome.className = "dia-welcome";
@@ -2321,16 +2341,45 @@ export class PBIChat implements IVisual {
     }
 
     private loadPersistedData(options: VisualUpdateOptions): void {
+        // PRIORITY 1: Restore from Power BI's persistProperties (most reliable across page switches)
         if (options && options.dataViews && options.dataViews[0] && options.dataViews[0].metadata.objects) {
-            const obj = options.dataViews[0].metadata.objects.pbichat;
-            if (obj) {
-                this.history = obj.history || [];
+            const obj = (options.dataViews[0].metadata.objects as any).pbichat;
+            if (obj && obj.history && Array.isArray(obj.history) && obj.history.length > 0) {
+                this.history = obj.history;
                 this.currentReportId = obj.currentReportId || "";
-                // Re-render messages if history loaded
+                this.renderMessages();
+                return;
+            }
+        }
+        
+        // PRIORITY 2: Try sessionStorage next (survives page switches within same session)
+        try {
+            const sessionKey = "pbichat_history_session";
+            const sessionStored = sessionStorage.getItem(sessionKey);
+            if (sessionStored) {
+                this.history = JSON.parse(sessionStored);
                 if (this.history.length > 0) {
                     this.renderMessages();
+                    return;
                 }
             }
+        } catch (e) {
+            console.warn("Failed to load from sessionStorage:", e);
+        }
+        
+        // PRIORITY 3: Fallback to localStorage
+        try {
+            const storageKey = `pbichat_history_${this.currentReportId || "default"}`;
+            const stored = localStorage.getItem(storageKey);
+            if (stored) {
+                this.history = JSON.parse(stored);
+                if (this.history.length > 0) {
+                    this.renderMessages();
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn("Failed to load from localStorage:", e);
         }
     }
 
@@ -2344,19 +2393,44 @@ export class PBIChat implements IVisual {
         }
         // Add messages
         for (const msg of this.history) {
-            this.addMessage(msg.role, msg.content);
+            // Convert 'assistant' role to 'ai' for addMessage
+            const displayRole = msg.role === "assistant" ? "ai" : "user";
+            this.addMessage(displayRole, msg.content);
         }
     }
 
     private persistData(): void {
-        const data = {
-            history: this.history,
-            currentReportId: this.currentReportId
-        };
-        this.host.persistProperties({
-            merge: {
-                pbichat: data
-            }
-        });
+        // Persist to localStorage (for long-term fallback)
+        const storageKey = `pbichat_history_${this.currentReportId || "default"}`;
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(this.history));
+        } catch (e) {
+            console.warn("Failed to save chat history to localStorage:", e);
+        }
+        
+        // Persist to sessionStorage (survives page switches within same session)
+        try {
+            const sessionKey = "pbichat_history_session";
+            sessionStorage.setItem(sessionKey, JSON.stringify(this.history));
+        } catch (e) {
+            console.warn("Failed to save chat history to sessionStorage:", e);
+        }
+        
+        // Also persist to Power BI (for primary restoration across page switches)
+        try {
+            const data = {
+                history: this.history,
+                currentReportId: this.currentReportId
+            };
+            this.host.persistProperties({
+                merge: [{
+                    objectName: "pbichat",
+                    properties: data,
+                    selector: null
+                } as any]
+            });
+        } catch (e) {
+            console.warn("Failed to persist to Power BI:", e);
+        }
     }
 }

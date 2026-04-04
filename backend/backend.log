@@ -1114,3 +1114,233 @@ SELECT
   "datasets": [
     { "label": "Incidents", "data...
 2026-04-02 10:46:29,301 INFO [LOOP 2] No sql_exec blocks found, returning final response
+2026-04-02 10:57:46,095 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-02 10:57:47,019 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 11:03:43,913 WARNING Python-dotenv could not parse statement starting at line 11
+2026-04-04 11:06:37,033 WARNING Python-dotenv could not parse statement starting at line 11
+2026-04-04 11:07:02,675 INFO Connection 'gold-schema': preserved existing token
+2026-04-04 11:07:33,451 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 11:07:45,779 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:07:57,958 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:08:10,112 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:08:22,234 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:08:34,345 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:08:46,467 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:08:58,590 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:09:10,747 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:09:22,885 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:09:35,008 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:09:47,129 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:09:59,291 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:10:11,412 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:10:23,528 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:10:35,673 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:10:47,795 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:10:59,924 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:11:12,080 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:11:24,187 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:11:36,305 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:11:48,430 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:12:00,543 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:12:12,680 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:12:24,815 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:12:36,935 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:12:49,050 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 11:12:56,332 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements/01f13037-f025-1459-942b-670d76be3b90 "HTTP/1.1 200 OK"
+2026-04-04 15:31:45,259 WARNING Python-dotenv could not parse statement starting at line 11
+2026-04-04 15:33:30,319 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:33:30,698 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158/start "HTTP/1.1 200 OK"
+2026-04-04 15:33:30,701 INFO Sent START command to warehouse 7cf16da9749c3158
+2026-04-04 15:33:36,379 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:33:41,054 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:33:46,086 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:33:51,849 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:33:56,058 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:08,830 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:14,550 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:19,176 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:24,200 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:29,168 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:34,236 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:39,197 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:41,872 INFO Connection 'gold-schema': preserved existing token
+2026-04-04 15:34:42,252 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:47,628 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:53,530 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:34:58,207 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:03,202 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:08,286 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:13,184 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:18,204 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:23,201 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:28,178 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:33,198 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:38,265 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:43,213 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:35:48,182 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:36:38,531 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:37:38,315 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:38:38,574 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:39:38,291 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:39:49,933 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:40:01,660 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:40:02,010 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:40:02,725 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:40:02,732 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-04 15:40:02,732 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-04. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-04 15:40:09,192 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 15:40:09,193 INFO [LOOP 1] LLM response (950 chars): ```sql_exec
+SELECT
+  ge.EVENT_DATE,
+  ge.JOB_NAME,
+  ge.JOB_NUMBER,
+  ge.GBU_NAME,
+  ed.CASE_NUMBER,
+  ed.EVENT_TYPE,
+  ed.INCIDENT_DESCRIPTION,
+  ed.INCIDENT_DETAILS,
+  ed.FIRST_AID,
+  ed.RECORDABLE,
+  ed.RESTRICTED_WORKDAY,
+  ed.LOST_TIME,
+  ed.FATALITY,
+  ed.POTENTIAL_RANKING_COLOR,
+  ed.ACTUAL_R...
+2026-04-04 15:40:09,806 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:40:09,807 INFO [LOOP 1] SQL: SELECT
+  ge.EVENT_DATE,
+  ge.JOB_NAME,
+  ge.JOB_NUMBER,
+  ge.GBU_NAME,
+  ed.CASE_NUMBER,
+  ed.EVENT_TYPE,
+  ed.INCIDENT_DESCRIPTION,
+  ed.INCIDENT_DETAILS,
+  ed.FIRST_AID,
+  ed.RECORDABLE,
+  ed.RESTRI... => ERROR: ERROR: 
+[PARSE_SYNTAX_ERROR] Syntax error at or near '"Highest Severity"'. SQLSTATE: 42601 (line 17, pos 5)
+
+== SQL ==
+SELECT
+  ge.EVENT_DATE,
+  ge.JOB_NAME,
+  ge.JOB_NUMBER,
+  ge.GBU_NAME,
+  ed.CASE_
+2026-04-04 15:40:15,185 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 15:40:15,186 INFO [LOOP 2] LLM response (1057 chars): ```sql_exec
+SELECT
+  ge.EVENT_DATE,
+  ge.JOB_NAME,
+  ge.JOB_NUMBER,
+  ge.GBU_NAME,
+  ed.CASE_NUMBER,
+  ed.EVENT_TYPE,
+  ed.INCIDENT_DESCRIPTION,
+  ed.INCIDENT_DETAILS,
+  ed.FIRST_AID,
+  ed.RECORDABLE,
+  ed.RESTRICTED_WORKDAY,
+  ed.LOST_TIME,
+  ed.FATALITY,
+  ed.POTENTIAL_RANKING_COLOR,
+  ed.ACTUAL_R...
+2026-04-04 15:40:40,557 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:40:40,559 INFO [LOOP 2] SQL: SELECT
+  ge.EVENT_DATE,
+  ge.JOB_NAME,
+  ge.JOB_NUMBER,
+  ge.GBU_NAME,
+  ed.CASE_NUMBER,
+  ed.EVENT_TYPE,
+  ed.INCIDENT_DESCRIPTION,
+  ed.INCIDENT_DETAILS,
+  ed.FIRST_AID,
+  ed.RECORDABLE,
+  ed.RESTRI... => 1983 chars: Columns: EVENT_DATE, JOB_NAME, JOB_NUMBER, GBU_NAME, CASE_NUMBER, EVENT_TYPE, INCIDENT_DESCRIPTION, INCIDENT_DETAILS, FIRST_AID, RECORDABLE, RESTRICTED_WORKDAY, LOST_TIME, FATALITY, POTENTIAL_RANKING_
+2026-04-04 15:40:53,157 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 15:40:53,158 INFO [LOOP 3] LLM response (2757 chars): ### Latest incidents for NS&E projects — last 7 days
+
+**Total Incidents** 9 | **Latest Event Date** 2026-04-02 23:01:00 | **Projects** 4
+
+```chart
+{
+  "type": "bar",
+  "title": "Incidents by Event Date",
+  "labels": ["2026-03-30", "2026-03-31", "2026-04-01", "2026-04-02"],
+  "datasets": [
+    {
+    ...
+2026-04-04 15:40:53,158 INFO [LOOP 3] No sql_exec blocks found, returning final response
+2026-04-04 15:42:09,611 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:42:10,507 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:42:43,820 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:42:44,654 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:50:06,912 WARNING Python-dotenv could not parse statement starting at line 11
+2026-04-04 15:50:59,325 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:51:01,380 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:51:33,686 INFO Connection 'gold-schema': preserved existing token
+2026-04-04 15:51:34,572 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:51:37,024 INFO Connection 'gold-schema': preserved existing token
+2026-04-04 15:51:37,389 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:51:38,310 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:51:39,184 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:51:39,549 INFO HTTP Request: GET https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/warehouses/7cf16da9749c3158 "HTTP/1.1 200 OK"
+2026-04-04 15:51:40,135 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:51:40,147 INFO [CHAT] connections=1, semantic_model=132280 chars, system_prompt=83439 chars
+2026-04-04 15:51:40,148 INFO [CHAT] system_prompt_start: You are "PBIChat" -- a data query tool with live SQL access to one or more database connections.
+
+## CURRENT DATE
+Today is 2026-04-04. Use this when the user says "latest", "recent", "this month", "this year", "last 30 days", etc. Always anchor relative date references to this date.
+
+## #1 RULE -- D
+2026-04-04 15:51:44,138 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 15:51:44,139 INFO [LOOP 1] LLM response (534 chars): ```sql_exec
+SELECT
+  CAST(g.EVENT_DATE AS DATE) AS event_date,
+  d.CASE_NUMBER,
+  g.JOB_NAME,
+  g.JOB_NUMBER,
+  g.GBU_NAME,
+  d.EVENT_TYPE,
+  d."Highest Severity" AS highest_severity,
+  d.INCIDENT_DESCRIPTION
+FROM `gold-poland-prod`.iris.vw_global_events AS g
+JOIN `gold-poland-prod`.iris.vw_global_e...
+2026-04-04 15:51:44,741 INFO HTTP Request: POST https://dbc-a8f38731-5873.cloud.databricks.us/api/2.0/sql/statements "HTTP/1.1 200 OK"
+2026-04-04 15:51:44,743 INFO [LOOP 1] SQL: SELECT
+  CAST(g.EVENT_DATE AS DATE) AS event_date,
+  d.CASE_NUMBER,
+  g.JOB_NAME,
+  g.JOB_NUMBER,
+  g.GBU_NAME,
+  d.EVENT_TYPE,
+  d."Highest Severity" AS highest_severity,
+  d.INCIDENT_DESCRIPTION
+FRO... => ERROR: ERROR: 
+[PARSE_SYNTAX_ERROR] Syntax error at or near '"Highest Severity"'. SQLSTATE: 42601 (line 8, pos 4)
+
+== SQL ==
+SELECT
+  CAST(g.EVENT_DATE AS DATE) AS event_date,
+  d.CASE_NUMBER,
+  g.JOB_NAME,
+
+2026-04-04 15:51:49,368 INFO HTTP Request: POST https://nse-api-va-dmz.az-gov.ibechtel.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 15:51:49,369 INFO [LOOP 2] LLM response (870 chars): ```sql_exec
+SELECT
+  CAST(g.EVENT_DATE AS DATE) AS event_date,
+  d.CASE_NUMBER,
+  g.JOB_NAME,
+  g.JOB_NUMBER,
+  g.GBU_NAME,
+  d.EVENT_TYPE,
+  CASE
+    WHEN d.FIRST_AID = 'Y' AND d.RECORDABLE = 'N' THEN 'First Aid'
+    WHEN d.RECORDABLE = 'Y' AND d.RESTRICTED_WORKDAY = 'N' AND d.LOST_TIME = 'N' THEN ...
