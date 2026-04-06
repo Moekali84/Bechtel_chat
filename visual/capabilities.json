@@ -56,6 +56,21 @@
           "description": "Model name for the API"
         }
       }
+    },
+    "pbichat": {
+      "displayName": "PBIChat history",
+      "properties": {
+        "historyJson": {
+          "type": { "text": true },
+          "displayName": "Chat history JSON",
+          "description": "Serialized chat history for page navigation persistence"
+        },
+        "currentReportId": {
+          "type": { "text": true },
+          "displayName": "Report ID",
+          "description": "ID used to scope persisted chat history"
+        }
+      }
     }
   }
 }

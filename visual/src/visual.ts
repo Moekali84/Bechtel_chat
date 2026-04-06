@@ -2341,14 +2341,18 @@ export class PBIChat implements IVisual {
     }
 
     private loadPersistedData(options: VisualUpdateOptions): void {
-        // PRIORITY 1: Restore from Power BI's persistProperties (most reliable across page switches)
+        // PRIORITY 1: Restore from Power BI metadata (most reliable across page switches)
         if (options && options.dataViews && options.dataViews[0] && options.dataViews[0].metadata.objects) {
             const obj = (options.dataViews[0].metadata.objects as any).pbichat;
-            if (obj && obj.history && Array.isArray(obj.history) && obj.history.length > 0) {
-                this.history = obj.history;
-                this.currentReportId = obj.currentReportId || "";
-                this.renderMessages();
-                return;
+            if (obj && typeof obj.historyJson === "string" && obj.historyJson.length > 0) {
+                try {
+                    this.history = JSON.parse(obj.historyJson);
+                    this.currentReportId = obj.currentReportId || "";
+                    this.renderMessages();
+                    return;
+                } catch (e) {
+                    console.warn("Failed to parse persisted chat history:", e);
+                }
             }
         }
         
@@ -2419,14 +2423,14 @@ export class PBIChat implements IVisual {
         // Also persist to Power BI (for primary restoration across page switches)
         try {
             const data = {
-                history: this.history,
+                historyJson: JSON.stringify(this.history),
                 currentReportId: this.currentReportId
             };
             this.host.persistProperties({
                 merge: [{
                     objectName: "pbichat",
-                    properties: data,
-                    selector: null
+                    selector: {},
+                    properties: data
                 } as any]
             });
         } catch (e) {
