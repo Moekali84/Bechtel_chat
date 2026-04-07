@@ -1670,3 +1670,4 @@ event_date | CASE_NUMBER | JOB_NAME | JOB_NUMBER | GBU_N
   "datasets": [
     { "label": "Incidents", "data": [4, ...
 2026-04-04 16:27:12,766 INFO [LOOP 3] No sql_exec blocks found, returning final response
+2026-04-07 08:39:04,577 WARNING Python-dotenv could not parse statement starting at line 11
