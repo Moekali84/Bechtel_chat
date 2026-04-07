@@ -41,7 +41,6 @@ PBIChat/
 │   ├── capabilities.json    # Power BI capabilities declaration
 │   ├── tsconfig.json        # TypeScript config
 │   └── package.json         # Node dependencies
-├── legal/                   # Privacy Policy, EULA, ToS, DPA, Cookie Policy
 └── README.md
 ```
 
