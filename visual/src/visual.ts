@@ -1517,11 +1517,56 @@ export class PBIChat implements IVisual {
             }
         }
 
+        // Restore TMDL state from backend if tmdlLoaded is false
+        // (happens when Power BI destroys and recreates the visual on page switch)
+        if (this.backendUrl && !this.tmdlLoaded) {
+            this.restoreTmdlState();
+        }
+
         // High contrast mode support
         this.applyHighContrast();
 
         this.updateStatus();
         this.host.eventService.renderingFinished(options);
+    }
+
+    private async restoreTmdlState(): Promise<void> {
+        try {
+            const resp = await fetch(`${this.backendUrl}/config`);
+            if (!resp.ok) return;
+            const cfg = await resp.json();
+
+            // Restore TMDL projects list
+            this.tmdlProjects = cfg.tmdl_projects || [];
+
+            // Restore tmdlLoaded flag if the backend confirms the model is loaded
+            if (cfg.semantic_model_loaded && this.currentReportId) {
+                this.tmdlLoaded = true;
+            } else if (this.tmdlProjects.length > 0) {
+                // Auto-select first project if currentReportId no longer valid
+                const match = this.tmdlProjects.find(p => p.report_id === this.currentReportId);
+                if (match) {
+                    this.tmdlLoaded = true;
+                } else {
+                    this.selectTmdlProject(this.tmdlProjects[0].report_id);
+                }
+            }
+
+            // Restore connections if empty
+            if (this.connections.length === 0) {
+                const connResp = await fetch(`${this.backendUrl}/connections`);
+                if (connResp.ok) {
+                    const connData = await connResp.json();
+                    this.connections = (connData.connections || []).map((c: any) => {
+                        if (c.token && c.token.endsWith("...")) { c._tokenSaved = true; c.token = ""; }
+                        if (c.password === "***") { c._passwordSaved = true; c.password = ""; }
+                        return c;
+                    });
+                }
+            }
+        } catch (_) {
+            // Backend not reachable — state will remain unloaded
+        }
     }
 
     private applyHighContrast(): void {
@@ -2341,13 +2386,21 @@ export class PBIChat implements IVisual {
     }
 
     private loadPersistedData(options: VisualUpdateOptions): void {
+        // Always restore TMDL state from sessionStorage first (fast, no network call)
+        try {
+            const savedReportId = sessionStorage.getItem("pbichat_currentReportId");
+            const savedTmdlLoaded = sessionStorage.getItem("pbichat_tmdlLoaded");
+            if (savedReportId) this.currentReportId = savedReportId;
+            if (savedTmdlLoaded === "true") this.tmdlLoaded = true;
+        } catch (_) { /* sessionStorage not available */ }
+
         // PRIORITY 1: Restore from Power BI metadata (most reliable across page switches)
         if (options && options.dataViews && options.dataViews[0] && options.dataViews[0].metadata.objects) {
             const obj = (options.dataViews[0].metadata.objects as any).pbichat;
             if (obj && typeof obj.historyJson === "string" && obj.historyJson.length > 0) {
                 try {
                     this.history = JSON.parse(obj.historyJson);
-                    this.currentReportId = obj.currentReportId || "";
+                    if (obj.currentReportId) this.currentReportId = obj.currentReportId;
                     this.renderMessages();
                     return;
                 } catch (e) {
@@ -2355,7 +2408,7 @@ export class PBIChat implements IVisual {
                 }
             }
         }
-        
+
         // PRIORITY 2: Try sessionStorage next (survives page switches within same session)
         try {
             const sessionKey = "pbichat_history_session";
@@ -2370,7 +2423,7 @@ export class PBIChat implements IVisual {
         } catch (e) {
             console.warn("Failed to load from sessionStorage:", e);
         }
-        
+
         // PRIORITY 3: Fallback to localStorage
         try {
             const storageKey = `pbichat_history_${this.currentReportId || "default"}`;
@@ -2411,15 +2464,18 @@ export class PBIChat implements IVisual {
         } catch (e) {
             console.warn("Failed to save chat history to localStorage:", e);
         }
-        
+
         // Persist to sessionStorage (survives page switches within same session)
         try {
             const sessionKey = "pbichat_history_session";
             sessionStorage.setItem(sessionKey, JSON.stringify(this.history));
+            // Also persist TMDL state and report ID to sessionStorage
+            sessionStorage.setItem("pbichat_currentReportId", this.currentReportId || "");
+            sessionStorage.setItem("pbichat_tmdlLoaded", this.tmdlLoaded ? "true" : "false");
         } catch (e) {
-            console.warn("Failed to save chat history to sessionStorage:", e);
+            console.warn("Failed to save to sessionStorage:", e);
         }
-        
+
         // Also persist to Power BI (for primary restoration across page switches)
         try {
             const data = {
