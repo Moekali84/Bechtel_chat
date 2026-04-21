@@ -77,6 +77,10 @@ export class PBIChat implements IVisual {
         this.container.innerHTML = "";
         this.buildUI();
         this.wakeAndVerify();
+        // Kick off backend state sync immediately so tmdlLoaded is populated
+        // before the user has a chance to press Send. Power BI may not call
+        // update() right away after a page switch, so we don't rely on it.
+        if (this.backendUrl) this.refreshBackendState();
     }
 
     // ======================================
@@ -1575,7 +1579,14 @@ export class PBIChat implements IVisual {
         const useInline = this.dataMode === "inline" || (this.dataMode === "auto" && !!this.inlineDataCsv);
         const useDatabase = this.dataMode === "database" || (this.dataMode === "auto" && !this.inlineDataCsv);
 
-        // TMDL is required for all AI features
+        // TMDL is required for all AI features. Re-sync from the backend
+        // before failing — Power BI page switches destroy and recreate the
+        // visual, and the async refresh in update() may not have landed by
+        // the time the user presses Send. This avoids a spurious error when
+        // the semantic model actually is loaded on the server.
+        if (!this.tmdlLoaded) {
+            await this.refreshBackendState();
+        }
         if (!this.tmdlLoaded) {
             this.showError("Semantic model (.tmdl files) must be loaded before using AI features. Open Settings to upload your .tmdl files.");
             return;
