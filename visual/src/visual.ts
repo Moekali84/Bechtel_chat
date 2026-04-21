@@ -39,6 +39,7 @@ export class PBIChat implements IVisual {
         host?: string; http_path?: string; token?: string; catalog_schema?: string;
         server?: string; database?: string; username?: string; password?: string;
         _tokenSaved?: boolean; _passwordSaved?: boolean;
+        _tokenPreview?: string;
     }> = [];
 
     // Warehouse status tracking
@@ -53,7 +54,7 @@ export class PBIChat implements IVisual {
 
     // Per-report TMDL project ID
     private currentReportId: string = "";
-    private tmdlProjects: Array<{ report_id: string; name: string; size_kb: number }> = [];
+    private tmdlProjects: Array<{ report_id: string; name: string; size_kb: number; modified?: number }> = [];
 
     // Inline data mode (columns dropped into field well)
     private inlineDataCsv: string = "";
@@ -530,7 +531,10 @@ export class PBIChat implements IVisual {
 
     private async loadConfigFromBackend(): Promise<void> {
         try {
-            const resp = await fetch(`${this.backendUrl}/config`);
+            const cfgUrl = this.currentReportId
+                ? `${this.backendUrl}/config?report_id=${encodeURIComponent(this.currentReportId)}`
+                : `${this.backendUrl}/config`;
+            const resp = await fetch(cfgUrl);
             if (!resp.ok) return;
             const cfg = await resp.json();
 
@@ -579,8 +583,14 @@ export class PBIChat implements IVisual {
                     if (connResp.ok) {
                         const connData = await connResp.json();
                         this.connections = (connData.connections || []).map((c: any) => {
-                            // Mark which secrets are saved on the backend (redacted = saved)
-                            if (c.token && c.token.endsWith("...")) { c._tokenSaved = true; c.token = ""; }
+                            // Mark which secrets are saved on the backend (redacted = saved).
+                            // Backend masks the last 8 chars of tokens with `********` so the
+                            // user can recognize which token is saved; older versions used `...`.
+                            if (c.token && (c.token.endsWith("********") || c.token.endsWith("..."))) {
+                                c._tokenSaved = true;
+                                c._tokenPreview = c.token;
+                                c.token = "";
+                            }
                             if (c.password === "***") { c._passwordSaved = true; c.password = ""; }
                             return c;
                         });
@@ -840,8 +850,9 @@ export class PBIChat implements IVisual {
                     <input type="text" class="dia-conn-f" data-idx="${idx}" data-field="http_path" value="${this.escapeHtml(conn.http_path || "")}" placeholder="/sql/1.0/warehouses/abc123"/>
                 </div>
                 <div class="dia-field">
-                    <label>Access Token</label>
-                    <input type="password" class="dia-conn-f" data-idx="${idx}" data-field="token" value="${this.escapeHtml(conn.token || "")}" placeholder="${conn._tokenSaved ? "••• saved (leave empty to keep)" : "dapi..."}"/>
+                    <label>Access Token${conn._tokenSaved ? ' <span class="dia-saved-badge">✓ Saved</span>' : ''}</label>
+                    <input type="password" class="dia-conn-f" data-idx="${idx}" data-field="token" value="${this.escapeHtml(conn.token || "")}" placeholder="${conn._tokenSaved ? "Leave empty to keep saved token" : "dapi..."}"/>
+                    ${conn._tokenPreview ? `<div class="dia-saved-preview">Saved: <code>${this.escapeHtml(conn._tokenPreview)}</code></div>` : ""}
                 </div>
                 <div class="dia-field">
                     <label>Default Catalog.Schema</label>
@@ -861,7 +872,7 @@ export class PBIChat implements IVisual {
                     <input type="text" class="dia-conn-f" data-idx="${idx}" data-field="username" value="${this.escapeHtml(conn.username || "")}" placeholder="sa"/>
                 </div>
                 <div class="dia-field">
-                    <label>Password</label>
+                    <label>Password${conn._passwordSaved ? ' <span class="dia-saved-badge">✓ Saved</span>' : ''}</label>
                     <input type="password" class="dia-conn-f" data-idx="${idx}" data-field="password" value="${this.escapeHtml(conn.password || "")}" placeholder="${conn._passwordSaved ? "••• saved (leave empty to keep)" : "..."}"/>
                 </div>
             `;
@@ -1190,6 +1201,8 @@ export class PBIChat implements IVisual {
         }
         this.renderTmdlProjects();
         this.updateApplyButton();
+        // Persist the active report ID so it survives Power BI page switches.
+        this.persistData();
     }
 
     private async deleteTmdlProject(reportId: string): Promise<void> {
@@ -1517,9 +1530,12 @@ export class PBIChat implements IVisual {
             }
         }
 
-        // Restore TMDL state from backend if tmdlLoaded is false
-        // (happens when Power BI destroys and recreates the visual on page switch)
-        if (this.backendUrl && !this.tmdlLoaded) {
+        // Always refresh TMDL state from backend on every update. Power BI may
+        // destroy and recreate the visual on page switch, and local state
+        // (sessionStorage / persistProperties) is not reliable across that
+        // boundary — so we authoritatively re-sync from the backend, which
+        // has the canonical TMDL project list and connections.
+        if (this.backendUrl) {
             this.restoreTmdlState();
         }
 
@@ -1532,7 +1548,10 @@ export class PBIChat implements IVisual {
 
     private async restoreTmdlState(): Promise<void> {
         try {
-            const resp = await fetch(`${this.backendUrl}/config`);
+            const cfgUrl = this.currentReportId
+                ? `${this.backendUrl}/config?report_id=${encodeURIComponent(this.currentReportId)}`
+                : `${this.backendUrl}/config`;
+            const resp = await fetch(cfgUrl);
             if (!resp.ok) return;
             const cfg = await resp.json();
 
@@ -1543,12 +1562,18 @@ export class PBIChat implements IVisual {
             if (cfg.semantic_model_loaded && this.currentReportId) {
                 this.tmdlLoaded = true;
             } else if (this.tmdlProjects.length > 0) {
-                // Auto-select first project if currentReportId no longer valid
+                // currentReportId is empty or no longer matches a project on the
+                // backend. Pick the most-recently-modified project so page
+                // switches recover the project the user was actively using.
                 const match = this.tmdlProjects.find(p => p.report_id === this.currentReportId);
                 if (match) {
                     this.tmdlLoaded = true;
+                    this.persistData();
                 } else {
-                    this.selectTmdlProject(this.tmdlProjects[0].report_id);
+                    const mostRecent = [...this.tmdlProjects].sort(
+                        (a, b) => (b.modified || 0) - (a.modified || 0)
+                    )[0];
+                    this.selectTmdlProject(mostRecent.report_id);
                 }
             }
 
@@ -1558,7 +1583,11 @@ export class PBIChat implements IVisual {
                 if (connResp.ok) {
                     const connData = await connResp.json();
                     this.connections = (connData.connections || []).map((c: any) => {
-                        if (c.token && c.token.endsWith("...")) { c._tokenSaved = true; c.token = ""; }
+                        if (c.token && (c.token.endsWith("********") || c.token.endsWith("..."))) {
+                            c._tokenSaved = true;
+                            c._tokenPreview = c.token;
+                            c.token = "";
+                        }
                         if (c.password === "***") { c._passwordSaved = true; c.password = ""; }
                         return c;
                     });
@@ -2397,14 +2426,20 @@ export class PBIChat implements IVisual {
         // PRIORITY 1: Restore from Power BI metadata (most reliable across page switches)
         if (options && options.dataViews && options.dataViews[0] && options.dataViews[0].metadata.objects) {
             const obj = (options.dataViews[0].metadata.objects as any).pbichat;
-            if (obj && typeof obj.historyJson === "string" && obj.historyJson.length > 0) {
-                try {
-                    this.history = JSON.parse(obj.historyJson);
-                    if (obj.currentReportId) this.currentReportId = obj.currentReportId;
-                    this.renderMessages();
-                    return;
-                } catch (e) {
-                    console.warn("Failed to parse persisted chat history:", e);
+            if (obj) {
+                // Always restore currentReportId if persisted — independent of chat history
+                // (TMDL can be uploaded without ever sending a message).
+                if (typeof obj.currentReportId === "string" && obj.currentReportId.length > 0) {
+                    this.currentReportId = obj.currentReportId;
+                }
+                if (typeof obj.historyJson === "string" && obj.historyJson.length > 0) {
+                    try {
+                        this.history = JSON.parse(obj.historyJson);
+                        this.renderMessages();
+                        return;
+                    } catch (e) {
+                        console.warn("Failed to parse persisted chat history:", e);
+                    }
                 }
             }
         }

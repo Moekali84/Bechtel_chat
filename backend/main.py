@@ -1564,9 +1564,11 @@ async def list_connections():
     result = []
     for c in ctx.connections.values():
         d = dict(c)
-        # Redact secrets for GET
-        if d.get("token"):
-            d["token"] = d["token"][:8] + "..."
+        # Redact secrets for GET. Show first 4 chars + fixed-width mask so the
+        # user can recognize which token is saved without revealing length or body.
+        tok = d.get("token")
+        if tok:
+            d["token"] = (tok[:4] + "********") if len(tok) > 4 else "*" * len(tok)
         if d.get("password"):
             d["password"] = "***"
         result.append(d)
@@ -1601,7 +1603,9 @@ async def save_all_connections_endpoint(req: dict):
         # Preserve token if: sentinel, redacted, or empty (user didn't re-enter it)
         incoming_token = c.get("token") or ""
         if real_old_token and real_old_token != "__KEEP__":
-            if incoming_token in ("__KEEP__", "") or incoming_token.endswith("..."):
+            if (incoming_token in ("__KEEP__", "")
+                    or incoming_token.endswith("...")
+                    or incoming_token.endswith("********")):
                 c["token"] = real_old_token
                 logging.info(f"Connection '{cid}': preserved existing token")
         # Preserve password if: sentinel, redacted, or empty
