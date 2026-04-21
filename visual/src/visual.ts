@@ -92,7 +92,7 @@ export class PBIChat implements IVisual {
             <div class="dia-chat" id="dia-chat">
                 <div class="dia-msgs" id="dia-msgs">
             <div class="dia-logo" id="dia-logo">
-                <div class="dia-logo-tagline">Bechtel AI Powered Technologies<br/>NS&amp;E PIIM Team<br/><span class="dia-support-line">Support : Moe Al Khalili ; Malkhalili@bechtel.com</span></div>
+                <div class="dia-logo-tagline">Bechtel AI Powered Technologies<br/>NS&amp;E PIIM Team<br/><span class="dia-support-line">Support : Moe Al Khalili ; Malkhalili@bechtel.com</span><br/><span class="dia-support-line" style="opacity:0.5;font-size:10px">v1.0.0.4</span></div>
             </div>
                     <div class="dia-welcome" id="dia-welcome">
                         <div class="dia-setup-banner" id="dia-setup-banner">
@@ -1579,13 +1579,22 @@ export class PBIChat implements IVisual {
         const useInline = this.dataMode === "inline" || (this.dataMode === "auto" && !!this.inlineDataCsv);
         const useDatabase = this.dataMode === "database" || (this.dataMode === "auto" && !this.inlineDataCsv);
 
-        // TMDL is required for all AI features. Re-sync from the backend
-        // before failing — Power BI page switches destroy and recreate the
-        // visual, and the async refresh in update() may not have landed by
-        // the time the user presses Send. This avoids a spurious error when
-        // the semantic model actually is loaded on the server.
-        if (!this.tmdlLoaded) {
-            await this.refreshBackendState();
+        // TMDL is required for all AI features. Power BI page switches
+        // destroy and recreate the visual with tmdlLoaded=false, so before
+        // showing an error we always confirm against the backend with a
+        // direct, awaited fetch — independent of any background refresh.
+        if (!this.tmdlLoaded && this.backendUrl) {
+            try {
+                const r = await fetch(`${this.backendUrl}/config`);
+                if (r.ok) {
+                    const c = await r.json();
+                    if (c.semantic_model_loaded) {
+                        this.tmdlLoaded = true;
+                        this.tmdlSizeKb = (c.semantic_model_chars || 0) / 1024;
+                        this.renderTmdlStatus();
+                    }
+                }
+            } catch (_) { /* fall through to the error below */ }
         }
         if (!this.tmdlLoaded) {
             this.showError("Semantic model (.tmdl files) must be loaded before using AI features. Open Settings to upload your .tmdl files.");
