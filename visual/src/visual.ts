@@ -52,9 +52,8 @@ export class PBIChat implements IVisual {
     // Data mode: "auto" picks based on available data, "inline" forces inline, "database" forces database
     private dataMode: "auto" | "inline" | "database" = "auto";
 
-    // Per-report TMDL project ID
-    private currentReportId: string = "";
-    private tmdlProjects: Array<{ report_id: string; name: string; size_kb: number; modified?: number }> = [];
+    // Size of the loaded TMDL on the backend (KB), for display in the settings panel.
+    private tmdlSizeKb: number = 0;
 
     // Inline data mode (columns dropped into field well)
     private inlineDataCsv: string = "";
@@ -205,22 +204,16 @@ export class PBIChat implements IVisual {
                     </div>
 
                     <div class="dia-settings-section">Semantic Model (.tmdl Files)</div>
-                    <div class="dia-field">
-                        <label>Project Name</label>
-                        <input type="text" id="dia-tmdl-project-name" placeholder="e.g. sales-report, finance-dashboard" class="dia-input"/>
-                        <div class="dia-hint">A unique name to identify this TMDL project. Used to store and retrieve the semantic model per report.</div>
-                    </div>
+                    <div class="dia-tmdl-status" id="dia-tmdl-status">No semantic model uploaded yet.</div>
                     <div class="dia-tmdl-actions">
                         <button class="dia-test-btn" id="dia-add-tmdl-btn">Select Folder</button>
-                        <button class="dia-test-btn dia-btn-muted" id="dia-tmdl-clear-btn" style="display:none">Clear</button>
+                        <button class="dia-test-btn dia-btn-muted" id="dia-tmdl-clear-btn" style="display:none">Clear Files</button>
+                        <button class="dia-test-btn dia-btn-danger" id="dia-tmdl-delete-btn" style="display:none">Delete Saved Model</button>
                         <input type="file" id="dia-tmdl-file-input" webkitdirectory style="display:none"/>
                     </div>
-                    <div class="dia-hint">Select the semantic model folder. All .tmdl files inside it (including subfolders) will be imported automatically.</div>
+                    <div class="dia-hint">Select the semantic model folder. All .tmdl files inside it (including subfolders) will be uploaded and replace the previously saved model.</div>
                     <div class="dia-tmdl-file-list" id="dia-tmdl-file-list" style="display:none"></div>
                     <div class="dia-test-result" id="dia-tmdl-result"></div>
-
-                    <div class="dia-settings-subsection" style="margin-top:12px">Stored TMDL Projects</div>
-                    <div id="dia-tmdl-projects-list" class="dia-tmdl-projects-list"></div>
 
                     <div class="dia-settings-section">Additional Context</div>
                     <div class="dia-field">
@@ -434,6 +427,7 @@ export class PBIChat implements IVisual {
         });
         (this.container.querySelector("#dia-tmdl-file-input") as HTMLInputElement).addEventListener("change", (e) => this.addTmdlFiles(e));
         this.container.querySelector("#dia-tmdl-clear-btn")!.addEventListener("click", () => this.clearTmdlFiles());
+        this.container.querySelector("#dia-tmdl-delete-btn")!.addEventListener("click", () => this.deleteSavedSemanticModel());
         this.container.querySelector("#dia-apply-btn")!.addEventListener("click", () => this.applySettings());
 
         // LLM Preset event listeners
@@ -531,10 +525,7 @@ export class PBIChat implements IVisual {
 
     private async loadConfigFromBackend(): Promise<void> {
         try {
-            const cfgUrl = this.currentReportId
-                ? `${this.backendUrl}/config?report_id=${encodeURIComponent(this.currentReportId)}`
-                : `${this.backendUrl}/config`;
-            const resp = await fetch(cfgUrl);
+            const resp = await fetch(`${this.backendUrl}/config`);
             if (!resp.ok) return;
             const cfg = await resp.json();
 
@@ -544,35 +535,14 @@ export class PBIChat implements IVisual {
             };
 
             setVal("#dia-s-extra", cfg.extra_context);
-            // Don't set individual API fields here - they'll be set by loadLLMPresets based on current preset
-            // setVal("#dia-api-endpoint", cfg.api_endpoint || "");
-            // setVal("#dia-api-key", ""); // Don't populate API key for security
-            // setVal("#dia-llm-model", cfg.llm_model || "");
 
             // Load LLM presets - this will populate the form fields
             this.loadLLMPresets(cfg.llm_presets || {}, cfg.current_llm_preset || "default", cfg);
 
-            // Load TMDL projects list
-            this.tmdlProjects = cfg.tmdl_projects || [];
-            this.renderTmdlProjects();
-
-            // Show TMDL load status if model is loaded and a project is selected
-            if (cfg.semantic_model_loaded && this.currentReportId) {
-                this.tmdlLoaded = true;
-                const tmdlResult = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
-                if (tmdlResult) {
-                    tmdlResult.className = "dia-test-result ok";
-                    tmdlResult.style.display = "block";
-                    tmdlResult.textContent = `TMDL loaded: "${this.currentReportId}" (${(cfg.semantic_model_chars / 1024).toFixed(1)} KB)`;
-                }
-            } else if (this.tmdlProjects.length > 0 && !this.currentReportId) {
-                // Auto-select the first project if none is selected
-                this.selectTmdlProject(this.tmdlProjects[0].report_id);
-            }
-
-            // Sync project name input
-            const nameInput = this.container.querySelector("#dia-tmdl-project-name") as HTMLInputElement;
-            if (nameInput && this.currentReportId) nameInput.value = this.currentReportId;
+            // Sync TMDL load state from the backend (single semantic model file).
+            this.tmdlLoaded = !!cfg.semantic_model_loaded;
+            this.tmdlSizeKb = cfg.semantic_model_chars ? cfg.semantic_model_chars / 1024 : 0;
+            this.renderTmdlStatus();
 
             this.extraContext = cfg.extra_context || "";
 
@@ -1071,18 +1041,6 @@ export class PBIChat implements IVisual {
         if (this.pendingTmdlFiles.length === 0) return;
 
         const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
-
-        // Read report_id from the project name input
-        const projectNameInput = this.container.querySelector("#dia-tmdl-project-name") as HTMLInputElement;
-        const reportId = (projectNameInput?.value || "").trim().replace(/[^a-zA-Z0-9_\-]/g, "-");
-
-        if (!reportId) {
-            resultEl.className = "dia-test-result fail";
-            resultEl.style.display = "block";
-            resultEl.textContent = "Enter a Project Name before uploading.";
-            return;
-        }
-
         resultEl.className = "dia-test-result";
         resultEl.style.display = "block";
         resultEl.textContent = `Uploading ${this.pendingTmdlFiles.length} file(s)...`;
@@ -1095,7 +1053,7 @@ export class PBIChat implements IVisual {
         }
 
         try {
-            const payload: any = { files: this.pendingTmdlFiles, report_id: reportId };
+            const payload: any = { files: this.pendingTmdlFiles };
             // Save current connections alongside the model
             if (this.connections.length > 0) {
                 payload.connections = this.connections;
@@ -1115,16 +1073,14 @@ export class PBIChat implements IVisual {
             const data = await resp.json();
             resultEl.className = "dia-test-result ok";
             const skipped = data.files_skipped ? ` (${data.files_skipped} auto-generated skipped)` : "";
-            const msg = `Uploaded ${data.files_loaded} .tmdl file(s) (${(data.total_chars / 1024).toFixed(1)} KB) as "${reportId}"${skipped}`;
-            resultEl.textContent = msg;
-            this.currentReportId = reportId;
-            this.persistData();
+            const sizeKb = (data.total_chars / 1024);
+            resultEl.textContent = `Uploaded ${data.files_loaded} .tmdl file(s) (${sizeKb.toFixed(1)} KB)${skipped}`;
             this.pendingTmdlFiles = [];
             this.renderTmdlFileList();
             this.tmdlLoaded = true;
+            this.tmdlSizeKb = sizeKb;
+            this.renderTmdlStatus();
             this.updateApplyButton();
-            // Refresh projects list
-            this.loadTmdlProjects();
         } catch (err: any) {
             resultEl.className = "dia-test-result fail";
             resultEl.textContent = err.message || "Failed to upload TMDL files.";
@@ -1132,112 +1088,44 @@ export class PBIChat implements IVisual {
         }
     }
 
-    private async loadTmdlProjects(): Promise<void> {
-        const listEl = this.container.querySelector("#dia-tmdl-projects-list") as HTMLElement;
-        if (!listEl || !this.backendUrl) return;
-
-        try {
-            const resp = await fetch(`${this.backendUrl}/tmdl-projects`);
-            if (!resp.ok) return;
-            const data = await resp.json();
-            this.tmdlProjects = data.projects || [];
-            this.renderTmdlProjects();
-        } catch (_) { /* silently fail */ }
-    }
-
-    private renderTmdlProjects(): void {
-        const listEl = this.container.querySelector("#dia-tmdl-projects-list") as HTMLElement;
-        if (!listEl) return;
-
-        if (this.tmdlProjects.length === 0) {
-            listEl.innerHTML = `<div class="dia-hint" style="margin-top:4px">No TMDL projects stored yet.</div>`;
-            return;
+    private renderTmdlStatus(): void {
+        const statusEl = this.container.querySelector("#dia-tmdl-status") as HTMLElement;
+        const deleteBtn = this.container.querySelector("#dia-tmdl-delete-btn") as HTMLElement;
+        if (!statusEl) return;
+        if (this.tmdlLoaded) {
+            statusEl.innerHTML = `<span class="dia-saved-badge">✓ Saved</span> Semantic model loaded (${this.tmdlSizeKb.toFixed(1)} KB)`;
+            statusEl.className = "dia-tmdl-status loaded";
+            if (deleteBtn) deleteBtn.style.display = "";
+        } else {
+            statusEl.textContent = "No semantic model uploaded yet.";
+            statusEl.className = "dia-tmdl-status";
+            if (deleteBtn) deleteBtn.style.display = "none";
         }
-
-        listEl.innerHTML = this.tmdlProjects.map(p => {
-            const isActive = p.report_id === this.currentReportId;
-            return `<div class="dia-tmdl-project-item${isActive ? " active" : ""}" data-rid="${p.report_id}">
-                <div class="dia-tmdl-project-info">
-                    <span class="dia-tmdl-project-name">${p.report_id}</span>
-                    <span class="dia-tmdl-project-size">${p.size_kb} KB</span>
-                </div>
-                <div class="dia-tmdl-project-actions">
-                    <button class="dia-test-btn dia-btn-sm dia-tmdl-select-btn" data-rid="${p.report_id}">${isActive ? "✓ Active" : "Select"}</button>
-                    <button class="dia-test-btn dia-btn-sm dia-btn-danger dia-tmdl-delete-btn" data-rid="${p.report_id}">Delete</button>
-                </div>
-            </div>`;
-        }).join("");
-
-        // Bind select buttons
-        listEl.querySelectorAll(".dia-tmdl-select-btn").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const rid = (btn as HTMLElement).getAttribute("data-rid") || "";
-                this.selectTmdlProject(rid);
-            });
-        });
-
-        // Bind delete buttons
-        listEl.querySelectorAll(".dia-tmdl-delete-btn").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const rid = (btn as HTMLElement).getAttribute("data-rid") || "";
-                this.deleteTmdlProject(rid);
-            });
-        });
     }
 
-    private selectTmdlProject(reportId: string): void {
-        this.currentReportId = reportId;
-        this.tmdlLoaded = true;
-        // Update project name input
-        const nameInput = this.container.querySelector("#dia-tmdl-project-name") as HTMLInputElement;
-        if (nameInput) nameInput.value = reportId;
-        // Update result display
-        const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
-        if (resultEl) {
-            const project = this.tmdlProjects.find(p => p.report_id === reportId);
-            resultEl.className = "dia-test-result ok";
-            resultEl.style.display = "block";
-            resultEl.textContent = `TMDL loaded: "${reportId}" (${project?.size_kb || "?"} KB)`;
-        }
-        this.renderTmdlProjects();
-        this.updateApplyButton();
-        // Persist the active report ID so it survives Power BI page switches.
-        this.persistData();
-    }
-
-    private async deleteTmdlProject(reportId: string): Promise<void> {
+    private async deleteSavedSemanticModel(): Promise<void> {
         const confirmed = await this.showConfirm(
-            `Delete TMDL project "${reportId}"? This cannot be undone.`
+            "Delete the saved semantic model? You'll need to upload a new TMDL folder to chat with database context again."
         );
         if (!confirmed) return;
 
+        const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
         try {
-            const resp = await fetch(`${this.backendUrl}/tmdl-projects/${encodeURIComponent(reportId)}`, {
-                method: "DELETE",
-            });
+            const resp = await fetch(`${this.backendUrl}/semantic-model`, { method: "DELETE" });
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
                 throw new Error(err.detail || `Error ${resp.status}`);
             }
-            // If we deleted the active project, clear selection
-            if (this.currentReportId === reportId) {
-                this.currentReportId = "";
-                this.tmdlLoaded = false;
-                const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
-                if (resultEl) { resultEl.style.display = "none"; }
-                const nameInput = this.container.querySelector("#dia-tmdl-project-name") as HTMLInputElement;
-                if (nameInput) nameInput.value = "";
-            }
-            // Remove from local list and re-render
-            this.tmdlProjects = this.tmdlProjects.filter(p => p.report_id !== reportId);
-            this.renderTmdlProjects();
+            this.tmdlLoaded = false;
+            this.tmdlSizeKb = 0;
+            this.renderTmdlStatus();
+            if (resultEl) { resultEl.style.display = "none"; }
             this.updateApplyButton();
         } catch (err: any) {
-            const resultEl = this.container.querySelector("#dia-tmdl-result") as HTMLElement;
             if (resultEl) {
                 resultEl.className = "dia-test-result fail";
                 resultEl.style.display = "block";
-                resultEl.textContent = err.message || "Failed to delete project.";
+                resultEl.textContent = err.message || "Failed to delete semantic model.";
             }
         }
     }
@@ -1530,13 +1418,11 @@ export class PBIChat implements IVisual {
             }
         }
 
-        // Always refresh TMDL state from backend on every update. Power BI may
-        // destroy and recreate the visual on page switch, and local state
-        // (sessionStorage / persistProperties) is not reliable across that
-        // boundary — so we authoritatively re-sync from the backend, which
-        // has the canonical TMDL project list and connections.
+        // Sync TMDL + connection state from the backend on every update so the
+        // visual reflects the canonical server state (e.g. after Power BI
+        // destroys and recreates the visual on a page switch).
         if (this.backendUrl) {
-            this.restoreTmdlState();
+            this.refreshBackendState();
         }
 
         // High contrast mode support
@@ -1546,38 +1432,17 @@ export class PBIChat implements IVisual {
         this.host.eventService.renderingFinished(options);
     }
 
-    private async restoreTmdlState(): Promise<void> {
+    private async refreshBackendState(): Promise<void> {
         try {
-            const cfgUrl = this.currentReportId
-                ? `${this.backendUrl}/config?report_id=${encodeURIComponent(this.currentReportId)}`
-                : `${this.backendUrl}/config`;
-            const resp = await fetch(cfgUrl);
+            const resp = await fetch(`${this.backendUrl}/config`);
             if (!resp.ok) return;
             const cfg = await resp.json();
+            this.tmdlLoaded = !!cfg.semantic_model_loaded;
+            this.tmdlSizeKb = cfg.semantic_model_chars ? cfg.semantic_model_chars / 1024 : 0;
+            this.renderTmdlStatus();
 
-            // Restore TMDL projects list
-            this.tmdlProjects = cfg.tmdl_projects || [];
-
-            // Restore tmdlLoaded flag if the backend confirms the model is loaded
-            if (cfg.semantic_model_loaded && this.currentReportId) {
-                this.tmdlLoaded = true;
-            } else if (this.tmdlProjects.length > 0) {
-                // currentReportId is empty or no longer matches a project on the
-                // backend. Pick the most-recently-modified project so page
-                // switches recover the project the user was actively using.
-                const match = this.tmdlProjects.find(p => p.report_id === this.currentReportId);
-                if (match) {
-                    this.tmdlLoaded = true;
-                    this.persistData();
-                } else {
-                    const mostRecent = [...this.tmdlProjects].sort(
-                        (a, b) => (b.modified || 0) - (a.modified || 0)
-                    )[0];
-                    this.selectTmdlProject(mostRecent.report_id);
-                }
-            }
-
-            // Restore connections if empty
+            // Pull connections only when our in-memory list is empty (avoid
+            // overwriting user-entered secrets with redacted values).
             if (this.connections.length === 0) {
                 const connResp = await fetch(`${this.backendUrl}/connections`);
                 if (connResp.ok) {
@@ -1644,19 +1509,15 @@ export class PBIChat implements IVisual {
     // ======================================
     private clearChat(): void {
         this.history = [];
-        
-        // Clear from localStorage
-        const storageKey = `pbichat_history_${this.currentReportId || "default"}`;
+
         try {
-            localStorage.removeItem(storageKey);
+            localStorage.removeItem("pbichat_history");
         } catch (e) {
             console.warn("Failed to clear chat history from localStorage:", e);
         }
-        
-        // Clear from sessionStorage
+
         try {
-            const sessionKey = "pbichat_history_session";
-            sessionStorage.removeItem(sessionKey);
+            sessionStorage.removeItem("pbichat_history");
         } catch (e) {
             console.warn("Failed to clear chat history from sessionStorage:", e);
         }
@@ -1762,7 +1623,6 @@ export class PBIChat implements IVisual {
                 message: text,
                 history: this.history.slice(-20),
                 extra_context: this.extraContext || null,
-                report_id: this.currentReportId || null,
             };
             if (useInline) {
                 payload.inline_data = this.inlineDataCsv;
@@ -2415,39 +2275,23 @@ export class PBIChat implements IVisual {
     }
 
     private loadPersistedData(options: VisualUpdateOptions): void {
-        // Always restore TMDL state from sessionStorage first (fast, no network call)
-        try {
-            const savedReportId = sessionStorage.getItem("pbichat_currentReportId");
-            const savedTmdlLoaded = sessionStorage.getItem("pbichat_tmdlLoaded");
-            if (savedReportId) this.currentReportId = savedReportId;
-            if (savedTmdlLoaded === "true") this.tmdlLoaded = true;
-        } catch (_) { /* sessionStorage not available */ }
-
-        // PRIORITY 1: Restore from Power BI metadata (most reliable across page switches)
+        // PRIORITY 1: Restore from Power BI metadata (survives across page switches)
         if (options && options.dataViews && options.dataViews[0] && options.dataViews[0].metadata.objects) {
             const obj = (options.dataViews[0].metadata.objects as any).pbichat;
-            if (obj) {
-                // Always restore currentReportId if persisted — independent of chat history
-                // (TMDL can be uploaded without ever sending a message).
-                if (typeof obj.currentReportId === "string" && obj.currentReportId.length > 0) {
-                    this.currentReportId = obj.currentReportId;
-                }
-                if (typeof obj.historyJson === "string" && obj.historyJson.length > 0) {
-                    try {
-                        this.history = JSON.parse(obj.historyJson);
-                        this.renderMessages();
-                        return;
-                    } catch (e) {
-                        console.warn("Failed to parse persisted chat history:", e);
-                    }
+            if (obj && typeof obj.historyJson === "string" && obj.historyJson.length > 0) {
+                try {
+                    this.history = JSON.parse(obj.historyJson);
+                    this.renderMessages();
+                    return;
+                } catch (e) {
+                    console.warn("Failed to parse persisted chat history:", e);
                 }
             }
         }
 
-        // PRIORITY 2: Try sessionStorage next (survives page switches within same session)
+        // PRIORITY 2: sessionStorage (within-session backup)
         try {
-            const sessionKey = "pbichat_history_session";
-            const sessionStored = sessionStorage.getItem(sessionKey);
+            const sessionStored = sessionStorage.getItem("pbichat_history");
             if (sessionStored) {
                 this.history = JSON.parse(sessionStored);
                 if (this.history.length > 0) {
@@ -2459,10 +2303,9 @@ export class PBIChat implements IVisual {
             console.warn("Failed to load from sessionStorage:", e);
         }
 
-        // PRIORITY 3: Fallback to localStorage
+        // PRIORITY 3: localStorage (cross-session fallback)
         try {
-            const storageKey = `pbichat_history_${this.currentReportId || "default"}`;
-            const stored = localStorage.getItem(storageKey);
+            const stored = localStorage.getItem("pbichat_history");
             if (stored) {
                 this.history = JSON.parse(stored);
                 if (this.history.length > 0) {
@@ -2492,36 +2335,26 @@ export class PBIChat implements IVisual {
     }
 
     private persistData(): void {
-        // Persist to localStorage (for long-term fallback)
-        const storageKey = `pbichat_history_${this.currentReportId || "default"}`;
+        const serialized = JSON.stringify(this.history);
+
         try {
-            localStorage.setItem(storageKey, JSON.stringify(this.history));
+            localStorage.setItem("pbichat_history", serialized);
         } catch (e) {
             console.warn("Failed to save chat history to localStorage:", e);
         }
 
-        // Persist to sessionStorage (survives page switches within same session)
         try {
-            const sessionKey = "pbichat_history_session";
-            sessionStorage.setItem(sessionKey, JSON.stringify(this.history));
-            // Also persist TMDL state and report ID to sessionStorage
-            sessionStorage.setItem("pbichat_currentReportId", this.currentReportId || "");
-            sessionStorage.setItem("pbichat_tmdlLoaded", this.tmdlLoaded ? "true" : "false");
+            sessionStorage.setItem("pbichat_history", serialized);
         } catch (e) {
             console.warn("Failed to save to sessionStorage:", e);
         }
 
-        // Also persist to Power BI (for primary restoration across page switches)
         try {
-            const data = {
-                historyJson: JSON.stringify(this.history),
-                currentReportId: this.currentReportId
-            };
             this.host.persistProperties({
                 merge: [{
                     objectName: "pbichat",
                     selector: {},
-                    properties: data
+                    properties: { historyJson: serialized }
                 } as any]
             });
         } catch (e) {

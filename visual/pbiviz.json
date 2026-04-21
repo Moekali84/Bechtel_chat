@@ -4,7 +4,7 @@
     "displayName": "PBIChat",
     "guid": "pbiChat_A849921B1A96",
     "visualClassName": "PBIChat",
-    "version": "1.0.0.1",
+    "version": "1.0.0.2",
     "description": "AI-powered chat assistant for Power BI with live SQL access to Databricks and SQL Server. Ask questions in natural language, get instant data-driven answers with interactive charts.",
     "supportUrl": "https://pbichat.com/support",
     "gitHubUrl": ""

@@ -29,15 +29,6 @@
     }
   ],
   "objects": {
-    "connection": {
-      "properties": {
-        "activeModelId": {
-          "type": { "text": true },
-          "displayName": "Active Model ID",
-          "description": "UUID of the active semantic model (auto-managed)"
-        }
-      }
-    },
     "apiSettings": {
       "properties": {
         "apiEndpoint": {
@@ -64,11 +55,6 @@
           "type": { "text": true },
           "displayName": "Chat history JSON",
           "description": "Serialized chat history for page navigation persistence"
-        },
-        "currentReportId": {
-          "type": { "text": true },
-          "displayName": "Report ID",
-          "description": "ID used to scope persisted chat history"
         }
       }
     }

@@ -74,8 +74,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.2")
 # LOCAL FILE-BASED CONFIG (replaces Supabase)
 # ══════════════════════════════════════════════════════════
 CONFIG_PATH = Path(__file__).parent / "config.json"
-SEMANTIC_MODEL_PATH = Path(__file__).parent / "semantic_model.txt"  # legacy fallback
-TMDL_DATA_DIR = Path(__file__).parent / "data"
+SEMANTIC_MODEL_PATH = Path(__file__).parent / "semantic_model.txt"
 
 
 def _load_config() -> dict:
@@ -104,16 +103,8 @@ def _save_config(config: dict) -> None:
     CONFIG_PATH.write_text(json.dumps(config, indent=2))
 
 
-def _load_semantic_model(report_id: str = "") -> str:
-    """Load TMDL content for a specific report_id, or fall back to legacy file."""
-    if report_id:
-        path = TMDL_DATA_DIR / report_id / "semantic_model.txt"
-        try:
-            if path.exists():
-                return path.read_text()
-        except Exception:
-            pass
-    # Fallback to legacy global file
+def _load_semantic_model() -> str:
+    """Load the TMDL semantic model content from disk."""
     try:
         if SEMANTIC_MODEL_PATH.exists():
             return SEMANTIC_MODEL_PATH.read_text()
@@ -122,54 +113,20 @@ def _load_semantic_model(report_id: str = "") -> str:
     return ""
 
 
-def _save_semantic_model(content: str, report_id: str = "") -> None:
-    """Save TMDL content for a specific report_id."""
-    if report_id:
-        folder = TMDL_DATA_DIR / report_id
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / "semantic_model.txt").write_text(content)
-    else:
-        SEMANTIC_MODEL_PATH.write_text(content)
+def _save_semantic_model(content: str) -> None:
+    """Save TMDL content to the single semantic model file."""
+    SEMANTIC_MODEL_PATH.write_text(content)
 
 
-def _delete_tmdl_project(report_id: str) -> bool:
-    """Delete a TMDL project folder by report_id. Returns True if deleted."""
-    import shutil
-    folder = TMDL_DATA_DIR / report_id
-    if folder.exists() and folder.is_dir():
-        shutil.rmtree(folder)
-        return True
+def _delete_semantic_model() -> bool:
+    """Delete the saved TMDL semantic model. Returns True if a file was removed."""
+    try:
+        if SEMANTIC_MODEL_PATH.exists():
+            SEMANTIC_MODEL_PATH.unlink()
+            return True
+    except Exception:
+        pass
     return False
-
-
-def _list_tmdl_projects() -> list[dict]:
-    """List all stored TMDL projects with metadata."""
-    projects = []
-    if not TMDL_DATA_DIR.exists():
-        return projects
-    for folder in sorted(TMDL_DATA_DIR.iterdir()):
-        if not folder.is_dir():
-            continue
-        model_file = folder / "semantic_model.txt"
-        if not model_file.exists():
-            continue
-        content = model_file.read_text()
-        # Extract a friendly name from the TMDL content (database name)
-        name = folder.name  # report_id as default
-        for line in content.split("\n"):
-            if line.startswith("=== ") and line.endswith(" ==="):
-                fname = line[4:-4].strip()
-                if fname.endswith("database.tmdl") or fname == "database.tmdl":
-                    # Next non-empty line often has the model name
-                    break
-        projects.append({
-            "report_id": folder.name,
-            "name": name,
-            "size_chars": len(content),
-            "size_kb": round(len(content) / 1024, 1),
-            "modified": model_file.stat().st_mtime,
-        })
-    return projects
 
 
 # All chart types — licensing is handled by the visual via Microsoft's Licensing API.
@@ -219,7 +176,7 @@ class UserContext:
         return self.api_key or AZURE_OPENAI_API_KEY
 
 
-def get_user_context(report_id: str = "") -> UserContext:
+def get_user_context() -> UserContext:
     """Load user context from local config files."""
     config = _load_config()
     ctx = UserContext(
@@ -237,7 +194,7 @@ def get_user_context(report_id: str = "") -> UserContext:
             }
         }),
         current_llm_preset=config.get("current_llm_preset", "default"),
-        semantic_model=_load_semantic_model(report_id),
+        semantic_model=_load_semantic_model(),
     )
     for c in config.get("connections", []):
         cid = c.get("id")
@@ -407,7 +364,6 @@ class ChatRequest(BaseModel):
     extra_context: Optional[str] = None
     inline_data: Optional[str] = None   # CSV from Power BI field wells
     inline_stats: Optional[str] = None  # JSON summary stats from ALL rows
-    report_id: Optional[str] = None     # Report ID for per-report TMDL lookup
 
     @field_validator("inline_data")
     @classmethod
@@ -455,8 +411,7 @@ class TmdlFile(BaseModel):
 
 class TmdlUploadRequest(BaseModel):
     files: list[TmdlFile]
-    connections: Optional[list] = None  # Per-report connections saved alongside the model
-    report_id: Optional[str] = None     # Report ID for per-report storage
+    connections: Optional[list] = None  # Connections saved alongside the model
 
 class HealthResponse(BaseModel):
     status: str
@@ -1327,7 +1282,7 @@ async def warehouse_status(connection_id: str = None):
 async def chat(req: ChatRequest, request: Request):
     """Main chat endpoint -- runs the agentic loop (rate-limited by IP)."""
     _check_rate_limit(request.client.host)
-    ctx = get_user_context(report_id=req.report_id or "")
+    ctx = get_user_context()
 
     # -- INLINE DATA MODE --
     if req.inline_data:
@@ -1488,9 +1443,9 @@ async def update_config(req: ConfigUpdate):
 
 
 @app.get("/config")
-async def get_config(report_id: str = ""):
+async def get_config():
     """Retrieve current configuration."""
-    ctx = get_user_context(report_id=report_id)
+    ctx = get_user_context()
     return {
         "llm_model": ctx.effective_llm_model,
         "semantic_model_loaded": bool(ctx.semantic_model),
@@ -1500,7 +1455,6 @@ async def get_config(report_id: str = ""):
         "api_key_configured": bool(ctx.api_key),
         "llm_presets": ctx.llm_presets,
         "current_llm_preset": ctx.current_llm_preset,
-        "tmdl_projects": _list_tmdl_projects(),
     }
 
 
@@ -1663,11 +1617,10 @@ async def upload_tmdl(req: TmdlUploadRequest):
 
     model_content = "\n\n".join(parts)
 
-    # Save to per-report folder (or legacy global file)
-    rid = req.report_id or ""
-    _save_semantic_model(model_content, rid)
+    # Save to the single semantic model file. Each upload replaces the previous one.
+    _save_semantic_model(model_content)
 
-    # If connections were provided with the upload, save them to config too
+    # If connections were provided with the upload, save them to config too.
     if req.connections is not None:
         config = _load_config()
         config["connections"] = req.connections
@@ -1677,7 +1630,6 @@ async def upload_tmdl(req: TmdlUploadRequest):
 
     return {
         "status": "loaded",
-        "report_id": rid,
         "files_loaded": len(filtered),
         "files_skipped": len(req.files) - len(filtered),
         "files": [f.name for f in sorted(filtered, key=lambda x: x.name)],
@@ -1685,26 +1637,12 @@ async def upload_tmdl(req: TmdlUploadRequest):
     }
 
 
-@app.get("/tmdl-projects")
-async def list_tmdl_projects():
-    """List all stored TMDL projects."""
-    projects = _list_tmdl_projects()
-    return {"projects": projects}
-
-
-@app.delete("/tmdl-projects/{report_id}")
-async def delete_tmdl_project(report_id: str):
-    """Delete a TMDL project by report_id."""
-    if not report_id or report_id.strip() == "":
-        raise HTTPException(status_code=400, detail="report_id is required.")
-    # Sanitize to prevent path traversal
-    safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", report_id)
-    if safe_id != report_id:
-        raise HTTPException(status_code=400, detail="Invalid report_id.")
-    deleted = _delete_tmdl_project(report_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"TMDL project '{report_id}' not found.")
-    return {"status": "deleted", "report_id": report_id}
+@app.delete("/semantic-model")
+async def clear_semantic_model():
+    """Delete the saved TMDL semantic model."""
+    deleted = _delete_semantic_model()
+    _invalidate_all_schema()
+    return {"status": "deleted" if deleted else "not_found"}
 
 
 @app.post("/test-connection")
