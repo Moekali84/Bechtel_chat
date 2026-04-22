@@ -11,6 +11,9 @@ __pycache__/
 venv/
 .venv/
 
+# Runtime logs
+*.log
+
 # Node
 node_modules/
 .tmp/

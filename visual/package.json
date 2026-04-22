@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "AI-powered chat assistant for Power BI with live SQL access",
   "main": "src/visual.ts",
-  "author": "PBIChat",
-  "license": "SEE LICENSE IN EULA",
-  "homepage": "https://pbichat.com",
+  "author": "Bechtel NS&E PIIM Team",
+  "license": "UNLICENSED",
+  "homepage": "",
   "scripts": {
     "pbiviz": "pbiviz",
     "start": "pbiviz start",

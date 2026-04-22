@@ -166,38 +166,6 @@ export class PBIChat implements IVisual {
                         <input type="text" id="dia-backend-url-custom" class="dia-input" placeholder="https://your-server.com" style="display:none; margin-top:6px;" />
                     </div>
 
-                    <div class="dia-settings-section">AI API Configuration</div>
-                    <div class="dia-field">
-                        <label>LLM Preset</label>
-                        <select id="dia-llm-preset-select" class="dia-select">
-                            <option value="default">Default (Azure OpenAI)</option>
-                        </select>
-                        <div class="dia-preset-actions">
-                            <button class="dia-test-btn" id="dia-save-preset-btn">Save as New</button>
-                            <button class="dia-test-btn dia-btn-danger" id="dia-delete-preset-btn" style="display:none">Delete</button>
-                        </div>
-                    </div>
-                    <div class="dia-field">
-                        <label>Preset Name</label>
-                        <input type="text" id="dia-preset-name" placeholder="My Custom LLM" class="dia-input"/>
-                        <div class="dia-hint">Name for the new preset when saving.</div>
-                    </div>
-                    <div class="dia-field">
-                        <label>API Endpoint</label>
-                        <input type="text" id="dia-api-endpoint" placeholder="https://api.openrouter.com/v1/chat/completions" class="dia-input"/>
-                        <div class="dia-hint">Leave empty to use default Azure OpenAI. Enter any OpenRouter API URL (e.g. https://api.openrouter.com/v1/chat/completions or https://openrouter.ai/api/v1/chat/completions).</div>
-                    </div>
-                    <div class="dia-field">
-                        <label>API Key</label>
-                        <input type="password" id="dia-api-key" placeholder="sk-or-v1-..." class="dia-input"/>
-                        <div class="dia-hint">Your API key for the configured endpoint. Leave empty to use default.</div>
-                    </div>
-                    <div class="dia-field">
-                        <label>LLM Model</label>
-                        <input type="text" id="dia-llm-model" placeholder="gpt-4o-mini" class="dia-input"/>
-                        <div class="dia-hint">Model name (e.g., gpt-4o-mini, anthropic/claude-3-haiku). Leave empty for default.</div>
-                    </div>
-
                     <div class="dia-settings-section dia-collapsible" id="dia-conn-header">
                         <span>Data Connections</span>
                         <span class="dia-collapse-icon" id="dia-conn-collapse-icon">▾</span>
@@ -434,11 +402,6 @@ export class PBIChat implements IVisual {
         this.container.querySelector("#dia-tmdl-delete-btn")!.addEventListener("click", () => this.deleteSavedSemanticModel());
         this.container.querySelector("#dia-apply-btn")!.addEventListener("click", () => this.applySettings());
 
-        // LLM Preset event listeners
-        (this.container.querySelector("#dia-llm-preset-select") as HTMLSelectElement).addEventListener("change", () => this.selectLLMPreset());
-        this.container.querySelector("#dia-save-preset-btn")!.addEventListener("click", () => this.saveLLMPreset());
-        this.container.querySelector("#dia-delete-preset-btn")!.addEventListener("click", () => this.deleteLLMPreset());
-
         // Global keyboard handler -- Escape closes overlays
         this.container.addEventListener("keydown", (e: KeyboardEvent) => {
             if (e.key === "Escape") {
@@ -540,9 +503,6 @@ export class PBIChat implements IVisual {
 
             setVal("#dia-s-extra", cfg.extra_context);
 
-            // Load LLM presets - this will populate the form fields
-            this.loadLLMPresets(cfg.llm_presets || {}, cfg.current_llm_preset || "default", cfg);
-
             // Sync TMDL load state from the backend (single semantic model file).
             this.tmdlLoaded = !!cfg.semantic_model_loaded;
             this.tmdlSizeKb = cfg.semantic_model_chars ? cfg.semantic_model_chars / 1024 : 0;
@@ -577,153 +537,6 @@ export class PBIChat implements IVisual {
         } catch (e) {
             // Backend unreachable -- fields stay empty
         }
-    }
-
-    private loadLLMPresets(presets: any, currentPreset: string, fallbackConfig?: any): void {
-        const select = this.container.querySelector("#dia-llm-preset-select") as HTMLSelectElement;
-        if (!select) return;
-
-        // Clear existing options except the first one
-        select.innerHTML = '<option value="default">Default (Azure OpenAI)</option>';
-
-        // Add custom presets
-        for (const [id, preset] of Object.entries(presets)) {
-            if (id !== "default") {
-                const option = document.createElement("option");
-                option.value = id;
-                option.textContent = (preset as any).name || id;
-                select.appendChild(option);
-            }
-        }
-
-        // Set current selection
-        select.value = currentPreset;
-
-        // Update form fields based on selected preset
-        this.updateFormFromPreset(currentPreset, presets, fallbackConfig);
-
-        // Show/hide delete button
-        const deleteBtn = this.container.querySelector("#dia-delete-preset-btn") as HTMLButtonElement;
-        if (deleteBtn) {
-            deleteBtn.style.display = currentPreset === "default" ? "none" : "inline-block";
-        }
-    }
-
-    private updateFormFromPreset(presetId: string, presets: any, fallbackConfig?: any): void {
-        const preset = presets[presetId];
-        
-        const setVal = (id: string, val: string) => {
-            const el = this.container.querySelector(id) as HTMLInputElement;
-            if (el) el.value = val || "";
-        };
-
-        if (preset) {
-            // Use preset values
-            setVal("#dia-api-endpoint", preset.api_endpoint || "");
-            setVal("#dia-api-key", ""); // Don't populate API key for security
-            setVal("#dia-llm-model", preset.llm_model || "");
-        } else if (fallbackConfig) {
-            // Use fallback individual config values
-            setVal("#dia-api-endpoint", fallbackConfig.api_endpoint || "");
-            setVal("#dia-api-key", ""); // Don't populate API key for security
-            setVal("#dia-llm-model", fallbackConfig.llm_model || "");
-        }
-    }
-
-    private async saveLLMPreset(): Promise<void> {
-        const presetName = (this.container.querySelector("#dia-preset-name") as HTMLInputElement).value.trim();
-        if (!presetName) {
-            alert("Please enter a preset name");
-            return;
-        }
-
-        const apiEndpoint = (this.container.querySelector("#dia-api-endpoint") as HTMLInputElement).value.trim();
-        const apiKey = (this.container.querySelector("#dia-api-key") as HTMLInputElement).value.trim();
-        const llmModel = (this.container.querySelector("#dia-llm-model") as HTMLInputElement).value.trim();
-
-        // Generate a unique ID
-        const presetId = `preset_${Date.now()}`;
-
-        try {
-            const resp = await fetch(`${this.backendUrl}/llm-presets`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    preset_id: presetId,
-                    preset: {
-                        name: presetName,
-                        api_endpoint: apiEndpoint,
-                        api_key: apiKey,
-                        llm_model: llmModel
-                    }
-                }),
-            });
-
-            if (resp.ok) {
-                // Automatically select the newly created preset
-                await this.selectPresetById(presetId);
-                // Clear the preset name field
-                (this.container.querySelector("#dia-preset-name") as HTMLInputElement).value = "";
-                alert(`Preset "${presetName}" saved successfully!`);
-            } else {
-                alert("Failed to save preset");
-            }
-        } catch (e) {
-            console.error("Error saving preset:", e);
-            alert("Error saving preset");
-        }
-    }
-
-    private async deleteLLMPreset(): Promise<void> {
-        const select = this.container.querySelector("#dia-llm-preset-select") as HTMLSelectElement;
-        const presetId = select.value;
-
-        if (presetId === "default") {
-            alert("Cannot delete the default preset");
-            return;
-        }
-
-        if (!confirm("Are you sure you want to delete this preset?")) {
-            return;
-        }
-
-        try {
-            const resp = await fetch(`${this.backendUrl}/llm-presets/${presetId}`, {
-                method: "DELETE",
-            });
-
-            if (resp.ok) {
-                // Reload config to refresh presets
-                await this.loadConfigFromBackend();
-                alert("Preset deleted successfully!");
-            } else {
-                alert("Failed to delete preset");
-            }
-        } catch (e) {
-            console.error("Error deleting preset:", e);
-            alert("Error deleting preset");
-        }
-    }
-
-    private async selectPresetById(presetId: string): Promise<void> {
-        try {
-            const resp = await fetch(`${this.backendUrl}/llm-presets/${presetId}/select`, {
-                method: "POST",
-            });
-
-            if (resp.ok) {
-                // Reload config to refresh UI with the selected preset
-                await this.loadConfigFromBackend();
-            }
-        } catch (e) {
-            console.error("Error selecting preset:", e);
-        }
-    }
-
-    private async selectLLMPreset(): Promise<void> {
-        const select = this.container.querySelector("#dia-llm-preset-select") as HTMLSelectElement;
-        const presetId = select.value;
-        await this.selectPresetById(presetId);
     }
 
     private closeSettings(): void {
@@ -1159,10 +972,6 @@ export class PBIChat implements IVisual {
         const extra = (this.container.querySelector("#dia-s-extra") as HTMLTextAreaElement).value.trim();
         this.extraContext = extra;
 
-        const apiEndpoint = (this.container.querySelector("#dia-api-endpoint") as HTMLInputElement).value.trim();
-        const apiKey = (this.container.querySelector("#dia-api-key") as HTMLInputElement).value.trim();
-        const llmModel = (this.container.querySelector("#dia-llm-model") as HTMLInputElement).value.trim();
-
         // Upload pending TMDL files if any
         if (this.pendingTmdlFiles.length > 0) {
             applyBtn.textContent = "Uploading TMDL files...";
@@ -1173,7 +982,7 @@ export class PBIChat implements IVisual {
         if (!this.tmdlLoaded) {
             applyBtn.textContent = prevText;
             applyBtn.disabled = false;
-            this.showError("Please upload your semantic model (.tmdl files) first. The TMDL is required before configuring connections or AI settings.");
+            this.showError("Please upload your semantic model (.tmdl files) first. The TMDL is required before configuring connections.");
             return;
         }
 
@@ -1184,9 +993,6 @@ export class PBIChat implements IVisual {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     extra_context: extra,
-                    api_endpoint: apiEndpoint || null,
-                    api_key: apiKey || null,
-                    llm_model: llmModel || null
                 }),
             });
         } catch (_) { /* settings still applied locally */ }

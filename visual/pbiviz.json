@@ -6,13 +6,13 @@
     "visualClassName": "PBIChat",
     "version": "1.0.0.4",
     "description": "AI-powered chat assistant for Power BI with live SQL access to Databricks and SQL Server. Ask questions in natural language, get instant data-driven answers with interactive charts.",
-    "supportUrl": "https://pbichat.com/support",
+    "supportUrl": "mailto:Malkhalili@bechtel.com",
     "gitHubUrl": ""
   },
   "apiVersion": "5.11.0",
   "author": {
-    "name": "PBIChat",
-    "email": "support@pbichat.com"
+    "name": "Bechtel NS&E PIIM Team",
+    "email": "Malkhalili@bechtel.com"
   },
   "assets": {
     "icon": "assets/icon.png"

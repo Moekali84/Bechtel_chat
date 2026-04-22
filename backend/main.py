@@ -86,16 +86,6 @@ def _load_config() -> dict:
     return {
         "extra_context": "",
         "connections": [],
-        "llm_model": "",
-        "llm_presets": {
-            "default": {
-                "name": "Default (Azure OpenAI)",
-                "api_endpoint": "",
-                "api_key": "",
-                "llm_model": ""
-            }
-        },
-        "current_llm_preset": "default"
     }
 
 
@@ -129,7 +119,7 @@ def _delete_semantic_model() -> bool:
     return False
 
 
-# All chart types — licensing is handled by the visual via Microsoft's Licensing API.
+# All chart types
 ALL_CHART_TYPES = {"bar", "line", "pie", "doughnut", "scatter", "horizontalBar"}
 
 
@@ -141,39 +131,7 @@ class UserContext:
     user_id: str
     extra_context: str = ""
     connections: dict[str, dict] = field(default_factory=dict)
-    llm_model: str = ""            # empty = use global default
     semantic_model: str = ""       # loaded from semantic_model.txt
-    api_endpoint: str = ""         # custom API endpoint (e.g., OpenRouter)
-    api_key: str = ""              # custom API key
-    llm_presets: dict[str, dict] = field(default_factory=dict)
-    current_llm_preset: str = "default"
-
-    @property
-    def effective_llm_model(self) -> str:
-        # First check current preset, then fall back to individual settings, then global default
-        if self.current_llm_preset and self.current_llm_preset in self.llm_presets:
-            preset = self.llm_presets[self.current_llm_preset]
-            if preset.get("llm_model"):
-                return preset["llm_model"]
-        return self.llm_model or LLM_MODEL
-
-    @property
-    def effective_api_endpoint(self) -> str:
-        # First check current preset, then fall back to individual settings, then global default
-        if self.current_llm_preset and self.current_llm_preset in self.llm_presets:
-            preset = self.llm_presets[self.current_llm_preset]
-            if preset.get("api_endpoint"):
-                return preset["api_endpoint"]
-        return self.api_endpoint or AZURE_OPENAI_ENDPOINT
-
-    @property
-    def effective_api_key(self) -> str:
-        # First check current preset, then fall back to individual settings, then global default
-        if self.current_llm_preset and self.current_llm_preset in self.llm_presets:
-            preset = self.llm_presets[self.current_llm_preset]
-            if preset.get("api_key"):
-                return preset["api_key"]
-        return self.api_key or AZURE_OPENAI_API_KEY
 
 
 def get_user_context() -> UserContext:
@@ -182,18 +140,6 @@ def get_user_context() -> UserContext:
     ctx = UserContext(
         user_id="local",
         extra_context=config.get("extra_context", ""),
-        llm_model=config.get("llm_model", ""),
-        api_endpoint=config.get("api_endpoint", ""),
-        api_key=config.get("api_key", ""),
-        llm_presets=config.get("llm_presets", {
-            "default": {
-                "name": "Default (Azure OpenAI)",
-                "api_endpoint": "",
-                "api_key": "",
-                "llm_model": ""
-            }
-        }),
-        current_llm_preset=config.get("current_llm_preset", "default"),
         semantic_model=_load_semantic_model(),
     )
     for c in config.get("connections", []):
@@ -386,24 +332,7 @@ class ChatResponse(BaseModel):
     queries_executed: list[dict] = []  # {sql, result, error} for transparency
 
 class ConfigUpdate(BaseModel):
-    llm_model: Optional[str] = None
     extra_context: Optional[str] = None
-    api_endpoint: Optional[str] = None
-    api_key: Optional[str] = None
-    current_llm_preset: Optional[str] = None
-
-class LLMPreset(BaseModel):
-    name: str
-    api_endpoint: str = ""
-    api_key: str = ""
-    llm_model: str = ""
-
-class LLMPresetCreate(BaseModel):
-    preset_id: str
-    preset: LLMPreset
-
-class LLMPresetDelete(BaseModel):
-    preset_id: str
 
 class TmdlFile(BaseModel):
     name: str
@@ -1156,40 +1085,26 @@ Supported types: {charts}
 # LLM API CALL (via Azure OpenAI -- Bechtel)
 # ══════════════════════════════════════════════════════════
 async def call_llm(system: str, messages: list[dict], ctx: UserContext = None) -> str:
-    """Call LLM API and return the text response.
-    Uses ctx for per-user model overrides when provided."""
-    api_key = ctx.effective_api_key if ctx else AZURE_OPENAI_API_KEY
-    endpoint = ctx.effective_api_endpoint if ctx else AZURE_OPENAI_ENDPOINT
-    model = ctx.effective_llm_model if ctx else LLM_MODEL
+    """Call Azure OpenAI and return the text response."""
+    api_key = AZURE_OPENAI_API_KEY
+    endpoint = AZURE_OPENAI_ENDPOINT
+    model = LLM_MODEL
 
     if not api_key or not endpoint:
         raise HTTPException(status_code=500, detail="LLM API key/endpoint not configured.")
 
-    # Determine API format based on endpoint
-    is_azure = "azure" in endpoint.lower()
-    
     api_messages = [{"role": "system", "content": system}] + messages
 
     headers = {
         "Content-Type": "application/json",
+        "api-key": api_key,
     }
-    
-    if is_azure:
-        headers["api-key"] = api_key
-        request_data = {
-            "model": model,
-            "max_completion_tokens": 4096,
-            "messages": api_messages,
-            "reasoning_effort": "none",
-        }
-    else:
-        # OpenRouter or other OpenAI-compatible APIs
-        headers["Authorization"] = f"Bearer {api_key}"
-        request_data = {
-            "model": model,
-            "max_completion_tokens": 4096,
-            "messages": api_messages,
-        }
+    request_data = {
+        "model": model,
+        "max_completion_tokens": 4096,
+        "messages": api_messages,
+        "reasoning_effort": "none",
+    }
 
     async with httpx.AsyncClient(timeout=120, verify=False) as client:
         resp = await client.post(
@@ -1224,11 +1139,10 @@ async def call_llm(system: str, messages: list[dict], ctx: UserContext = None) -
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
-    ctx = get_user_context()
     return HealthResponse(
         status="ok",
         databricks_connected=True,
-        llm_configured=bool(ctx.effective_api_key),
+        llm_configured=bool(AZURE_OPENAI_API_KEY),
     )
 
 
@@ -1291,7 +1205,6 @@ async def chat(req: ChatRequest, request: Request):
             chat_ctx = UserContext(
                 user_id=ctx.user_id, extra_context=req.extra_context,
                 connections=ctx.connections,
-                llm_model=ctx.llm_model,
                 semantic_model=ctx.semantic_model,
             )
         system = build_inline_system_prompt(
@@ -1340,7 +1253,6 @@ async def chat(req: ChatRequest, request: Request):
             user_id=ctx.user_id,
             extra_context=req.extra_context,
             connections=ctx.connections,
-            llm_model=ctx.llm_model,
             semantic_model=ctx.semantic_model,
         )
 
@@ -1427,16 +1339,8 @@ async def chat(req: ChatRequest, request: Request):
 async def update_config(req: ConfigUpdate):
     """Update configuration. Does NOT handle connections."""
     config = _load_config()
-    if req.llm_model is not None:
-        config["llm_model"] = req.llm_model
     if req.extra_context is not None:
         config["extra_context"] = req.extra_context
-    if req.api_endpoint is not None:
-        config["api_endpoint"] = req.api_endpoint
-    if req.api_key is not None:
-        config["api_key"] = req.api_key
-    if req.current_llm_preset is not None:
-        config["current_llm_preset"] = req.current_llm_preset
     _save_config(config)
     _invalidate_all_schema()
     return {"status": "updated"}
@@ -1447,69 +1351,11 @@ async def get_config():
     """Retrieve current configuration."""
     ctx = get_user_context()
     return {
-        "llm_model": ctx.effective_llm_model,
         "semantic_model_loaded": bool(ctx.semantic_model),
         "semantic_model_chars": len(ctx.semantic_model),
         "extra_context": ctx.extra_context,
-        "api_endpoint": ctx.api_endpoint,
-        "api_key_configured": bool(ctx.api_key),
-        "llm_presets": ctx.llm_presets,
-        "current_llm_preset": ctx.current_llm_preset,
     }
 
-
-@app.post("/llm-presets")
-async def create_llm_preset(req: LLMPresetCreate):
-    """Create or update an LLM preset."""
-    config = _load_config()
-    if "llm_presets" not in config:
-        config["llm_presets"] = {
-            "default": {
-                "name": "Default (Azure OpenAI)",
-                "api_endpoint": "",
-                "api_key": "",
-                "llm_model": ""
-            }
-        }
-
-    config["llm_presets"][req.preset_id] = req.preset.dict()
-    _save_config(config)
-    _invalidate_all_schema()
-    return {"status": "created", "preset_id": req.preset_id}
-
-
-@app.delete("/llm-presets/{preset_id}")
-async def delete_llm_preset(preset_id: str):
-    """Delete an LLM preset."""
-    if preset_id == "default":
-        raise HTTPException(status_code=400, detail="Cannot delete default preset")
-
-    config = _load_config()
-    if "llm_presets" in config and preset_id in config["llm_presets"]:
-        del config["llm_presets"][preset_id]
-
-        # If the deleted preset was current, switch to default
-        if config.get("current_llm_preset") == preset_id:
-            config["current_llm_preset"] = "default"
-
-        _save_config(config)
-        _invalidate_all_schema()
-        return {"status": "deleted", "preset_id": preset_id}
-    else:
-        raise HTTPException(status_code=404, detail="Preset not found")
-
-
-@app.post("/llm-presets/{preset_id}/select")
-async def select_llm_preset(preset_id: str):
-    """Select an LLM preset as current."""
-    config = _load_config()
-    if "llm_presets" not in config or preset_id not in config["llm_presets"]:
-        raise HTTPException(status_code=404, detail="Preset not found")
-
-    config["current_llm_preset"] = preset_id
-    _save_config(config)
-    _invalidate_all_schema()
-    return {"status": "selected", "preset_id": preset_id}
 
 @app.get("/connections")
 async def list_connections():

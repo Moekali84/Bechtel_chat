@@ -30,10 +30,7 @@ PBIChat/
 │   ├── .env                 # Runtime config (API keys — not committed)
 │   ├── .env.example         # Template for .env
 │   ├── requirements.txt     # Python dependencies
-│   ├── Dockerfile           # Container build for deployment
-│   └── aws/
-│       ├── deploy.sh        # One-command deploy + auto-scaling setup
-│       └── task-definition.json  # ECS Fargate task (1024 CPU, 2048 MB)
+│   └── Dockerfile           # Container build for deployment
 ├── visual/
 │   ├── src/visual.ts        # Main Power BI visual class (TypeScript)
 │   ├── style/visual.less    # All visual styling (dark/light themes)
@@ -120,14 +117,6 @@ cp .env.example .env   # Fill in your Azure OpenAI key and password
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Docker
-
-```bash
-cd backend
-docker build -t pbichat-backend .
-docker run -p 8000:8000 --env-file .env pbichat-backend
-```
-
 ## Visual (Power BI Custom Visual)
 
 ### Tech Stack
@@ -169,21 +158,23 @@ npm run package
 3. Select the `.pbiviz` file from `visual/dist/`
 4. The visual appears in the visualizations pane — drag it onto a report page
 
-## Deployment (AWS)
+## Deployment
 
-| Resource | Details |
-|----------|---------|
-| **ECS Cluster** | `pbichat` (Fargate) |
-| **ECS Service** | `pbichat-backend` (auto-scaling: 2-10 tasks) |
-| **Task Definition** | 1024 CPU, 2048 MB |
-| **ALB** | `pbichat-alb` with HTTPS (ACM certificate) |
-| **Secrets** | AWS Secrets Manager (`pbichat/backend-env`) |
-| **CI/CD** | CodeBuild → ECR → ECS |
-| **Logs** | CloudWatch (`/ecs/pbichat-backend`) |
-| **Auto-scaling** | CPU target 60%, scale-out cooldown 60s, scale-in cooldown 300s |
+The backend ships as a Docker image (see `backend/Dockerfile`). It is a stateless FastAPI app listening on port 8000 and can be hosted on any container platform Bechtel IT approves (e.g. Azure App Service, Azure Container Apps, AKS, or an on-prem container host).
+
+Requirements for the hosting environment:
+
+- Outbound HTTPS to the Bechtel Azure OpenAI endpoint (`AZURE_OPENAI_ENDPOINT`).
+- Outbound HTTPS to the Databricks workspace(s) users will connect to.
+- Outbound TCP (typically 1433) to any SQL Server instances users will connect to.
+- A way to inject `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, and `LLM_MODEL` as environment variables (ideally from a managed secret store — e.g. Azure Key Vault).
+- Inbound HTTPS from Power BI so the visual can reach the backend. `CORS_ORIGINS` should be set to `https://app.powerbi.com` (and any additional Power BI tenant URLs in use).
+
+Local build example:
 
 ```bash
 cd backend
-./aws/deploy.sh
-# Packages source → S3 → CodeBuild → ECR → ECS force deploy + auto-scaling setup
+docker build -t pbichat-backend .
+docker run -p 8000:8000 --env-file .env pbichat-backend
 ```
+
